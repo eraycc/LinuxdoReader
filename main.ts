@@ -1,14 +1,12 @@
-// main.ts - Linux DO RSS Reader (Fixed HTML Rendering)
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
-// --- 环境变量默认配置 ---
+// --- 配置与常量 ---
 const DEFAULT_CONFIG = {
   RSS_BASE_URL: Deno.env.get("RSS_BASE_URL") || "https://linuxdorss.longpink.com",
   JINA_BASE_URL: Deno.env.get("JINA_BASE_URL") || "https://r.jina.ai",
   JINA_API_KEY: Deno.env.get("JINA_API_KEY") || "",
 };
 
-// RSS 分类定义
 const CATEGORIES = [
   { id: "latest", name: "最新话题", icon: "🆕", file: "latest.xml" },
   { id: "top", name: "热门话题", icon: "🔥", file: "top.xml" },
@@ -24,381 +22,357 @@ const CATEGORIES = [
   { id: "feedback", name: "运营反馈", icon: "📊", file: "feedback.xml" },
 ];
 
-// --- 核心逻辑函数 ---
+// --- 核心工具函数 ---
 
-async function proxyRequest(url: string, headers: Record<string, string> = {}) {
-  try {
-    const response = await fetch(url, {
-      headers: { "User-Agent": "LinuxDOReader/5.0", ...headers },
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.text();
-  } catch (error) {
-    console.error(`Fetch Error: ${url}`, error);
-    throw error;
-  }
+// 1. HTML 反转义工具 (核心修复点)
+// 能够将 &lt;p&gt; 变回 <p>，确保浏览器渲染而不是显示源码
+function unescapeHTML(str: string) {
+  if (!str) return "";
+  return str
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, "&");
 }
 
-// 解析 RSS (保留原始内容，不转义)
+// 2. RSS 解析器 (重构版)
 function parseRSS(xml: string) {
-  const items = [];
+  const items: any[] = [];
+  // 使用非贪婪匹配捕获 item
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
   let match;
-  
+
   while ((match = itemRegex.exec(xml)) !== null) {
-    const itemContent = match[1];
-    
-    // 简单提取标签内容的函数
-    const getTag = (tag: string) => {
-      const regex = new RegExp(`<${tag}>(?:<\!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\/${tag}>`, 'i');
-      const m = itemContent.match(regex);
-      return m ? m[1].trim() : "";
+    const itemBlock = match[1];
+
+    // 提取函数：优先处理 CDATA，如果没有则处理普通文本，最后必须反转义
+    const extract = (tagName: string) => {
+      // 尝试匹配 <tag><![CDATA[content]]></tag>
+      const cdataRegex = new RegExp(`<${tagName}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*<\\/${tagName}>`, "i");
+      const cdataMatch = itemBlock.match(cdataRegex);
+      if (cdataMatch) return cdataMatch[1]; // CDATA 内容通常已经是 Raw HTML
+
+      // 尝试匹配 <tag>content</tag>
+      const normalRegex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, "i");
+      const normalMatch = itemBlock.match(normalRegex);
+      if (normalMatch) return unescapeHTML(normalMatch[1]); // 普通内容可能是转义过的，需要反转义
+
+      return "";
     };
 
-    const link = getTag("link");
+    const link = extract("link").trim();
+    // 提取 Topic ID
     const topicIdMatch = link.match(/\/topic\/(\d+)/);
-    
+
     if (link && topicIdMatch) {
-      // 获取原始 HTML 描述，不做任何处理，保留 CDATA 内的完整 HTML
-      let rawDesc = getTag("description");
-      
       items.push({
-        title: getTag("title"),
+        title: extract("title"),
+        link: link,
         topicId: topicIdMatch[1],
-        descriptionHTML: rawDesc, // 这里存储的是纯 HTML 字符串
-        pubDate: getTag("pubDate"),
-        creator: getTag("dc:creator")
+        // 这里的 descriptionHTML 现在绝对是 <p>...</p> 格式的真 HTML
+        descriptionHTML: extract("description"), 
+        pubDate: extract("pubDate"),
+        creator: extract("dc:creator") || "Linux Do",
       });
     }
   }
   return items;
 }
 
-function parseJinaResponse(content: string) {
-  const titleMatch = content.match(/Title: (.+)/);
-  const urlMatch = content.match(/URL Source: (.+)/);
-  const dateMatch = content.match(/Published Time: (.+)/);
-  let markdown = content;
-  const marker = "Markdown Content:";
-  const idx = content.indexOf(marker);
-  
-  if (idx !== -1) markdown = content.substring(idx + marker.length).trim();
-  else markdown = markdown.replace(/^(Title|URL Source|Published Time):.*\n/gm, '').trim();
-
-  return {
-    title: titleMatch ? titleMatch[1].trim() : "话题详情",
-    url: urlMatch ? urlMatch[1].trim() : "",
-    date: dateMatch ? dateMatch[1].trim() : "",
-    markdown: markdown,
-  };
+// 3. 网络请求封装
+async function proxyRequest(url: string, headers: Record<string, string> = {}) {
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/6.0", ...headers } });
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    return await res.text();
+  } catch (e) {
+    console.error("Fetch error:", e);
+    throw e;
+  }
 }
 
-// --- UI 样式 ---
+// --- 页面样式 (CSS) ---
 
-const STYLES = `
+const CSS = `
 :root {
-    --sidebar-width: 260px;
-    --primary: #7c3aed;
-    --bg-body: #f3f4f6;
-    --bg-sidebar: #1e1e2e;
-    --text-sidebar: #a6adc8;
-    --bg-card: #ffffff;
-    --text-main: #1f2937;
+  --sidebar-width: 260px;
+  --primary: #7c3aed;
+  --bg: #f3f4f6;
+  --card-bg: #fff;
+  --text: #374151;
+  --gray: #9ca3af;
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: sans-serif; background: var(--bg-body); color: var(--text-main); display: flex; min-height: 100vh; }
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
 
-/* Sidebar */
-.sidebar { width: var(--sidebar-width); background: var(--bg-sidebar); position: fixed; height: 100vh; left: 0; top: 0; z-index: 50; overflow-y: auto; transition: transform 0.3s; }
-.nav-links { padding: 1rem 0; }
-.nav-item { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: var(--text-sidebar); text-decoration: none; }
-.nav-item:hover { color: white; background: rgba(255,255,255,0.05); }
-.nav-item.active { color: white; background: rgba(255,255,255,0.1); border-left: 3px solid var(--primary); }
-.nav-item i { width: 24px; margin-right: 10px; }
+/* 侧边栏 */
+.sidebar { width: var(--sidebar-width); background: #1e1e2e; color: #a6adc8; position: fixed; inset: 0 auto 0 0; z-index: 50; overflow-y: auto; transition: transform 0.3s; }
+.brand { padding: 1.5rem; color: #fff; font-weight: bold; font-size: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.nav a { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: inherit; text-decoration: none; }
+.nav a:hover, .nav a.active { background: rgba(255,255,255,0.1); color: #fff; }
+.nav a.active { border-left: 3px solid var(--primary); }
+.nav i { width: 24px; margin-right: 8px; }
 
-/* Main */
-.main-wrapper { margin-left: var(--sidebar-width); flex: 1; transition: margin-left 0.3s; }
-.top-bar { background: white; padding: 1rem 2rem; position: sticky; top: 0; z-index: 40; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+/* 主区域 */
+.main { margin-left: var(--sidebar-width); flex: 1; width: 100%; transition: margin-left 0.3s; }
+.header { background: #fff; padding: 1rem 2rem; position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
 .content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
-.menu-toggle { display: none; background: none; border: none; font-size: 1.2rem; }
+.menu-btn { display: none; background: none; border: none; font-size: 1.2rem; cursor: pointer; }
 
-/* RSS Card Styling */
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
-.card { 
-    background: var(--bg-card); 
-    border-radius: 12px; 
-    padding: 1.5rem; 
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05); 
-    display: flex; 
-    flex-direction: column; 
-    position: relative; /* For full-card click */
-    overflow: hidden;
-    transition: transform 0.2s;
-}
-.card:hover { transform: translateY(-2px); box-shadow: 0 8px 12px rgba(0,0,0,0.1); }
+/* 卡片布局 */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
+.card { background: var(--card-bg); border-radius: 12px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; position: relative; overflow: hidden; transition: transform 0.2s; }
+.card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
 
-.rss-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; line-height: 1.4; }
-.rss-title a { color: var(--text-main); text-decoration: none; }
+.card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; line-height: 1.4; }
+.card-title a { color: var(--text); text-decoration: none; }
 
-/* --- 关键：强制约束 RSS HTML 内容 --- */
-.rss-html-content {
-    font-size: 0.95rem;
-    color: #4b5563;
-    line-height: 1.6;
-    margin-bottom: 1rem;
-    
-    /* 限制高度，防止长文刷屏 */
-    max-height: 300px; 
-    overflow: hidden;
-    position: relative;
-    
-    /* 底部渐变遮罩 */
-    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
-    mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+/* --- 核心：Description HTML 渲染修正 --- */
+.card-body {
+  font-size: 0.95rem;
+  color: #4b5563;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+  max-height: 260px; /* 防止过长 */
+  overflow: hidden;
+  position: relative;
+  /* 底部遮罩 */
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent);
+  mask-image: linear-gradient(180deg, #000 70%, transparent);
 }
 
-/* 约束图片：宽度自适应，高度限制，裁切 */
-.rss-html-content img {
-    display: block;
-    max-width: 100%;
-    height: auto;
-    max-height: 200px; /* 限制图片高度 */
-    object-fit: cover; /* 裁切 */
-    border-radius: 8px;
-    margin: 0.5rem 0;
+/* 强制控制 RSS 内部 HTML 元素的样式 */
+.card-body p { margin-bottom: 0.5rem; }
+.card-body img { 
+  display: block; 
+  max-width: 100%; 
+  height: auto; 
+  max-height: 180px; /* 限制图片高度 */
+  object-fit: cover; 
+  border-radius: 6px; 
+  margin: 0.5rem 0; 
 }
-
 /* 隐藏不需要的元素 */
-.rss-html-content small,  /* 隐藏 "1 post - 1 participant" */
-.rss-html-content a[href*="topic"] { /* 隐藏 "Read full topic" 链接 */
-    display: none !important;
-}
+.card-body small, 
+.card-body a[href*="topic"] { display: none !important; }
+.card-body br { display: none; }
 
-/* 移除所有链接的交互（防止在列表页误触）和样式 */
-.rss-html-content a {
-    pointer-events: none;
-    text-decoration: none;
-    color: inherit;
-}
+/* 禁止卡片内链接点击，全卡片响应 */
+.card-body a { pointer-events: none; text-decoration: none; color: inherit; }
 
-.rss-meta { 
-    margin-top: auto; 
-    padding-top: 0.8rem; 
-    border-top: 1px solid #e5e7eb; 
-    font-size: 0.85rem; 
-    color: #9ca3af; 
-    display: flex; 
-    justify-content: space-between; 
-}
+.card-meta { margin-top: auto; padding-top: 0.8rem; border-top: 1px solid #e5e7eb; font-size: 0.85rem; color: var(--gray); display: flex; justify-content: space-between; }
+.card-link { position: absolute; inset: 0; z-index: 10; }
 
-/* Setting & Reader */
-.settings-card { background: white; padding: 2rem; border-radius: 12px; }
-.form-control { width: 100%; padding: 0.8rem; border: 1px solid #e5e7eb; border-radius: 8px; margin: 0.5rem 0 1.5rem 0; }
-.btn { background: var(--primary); color: white; border: none; padding: 0.8rem 1.5rem; border-radius: 8px; cursor: pointer; }
-.reader-container { background: white; padding: 2rem; border-radius: 12px; min-height: 60vh; }
-.markdown-body img { max-width: 100%; }
+/* 其他页面 */
+.reader { background: #fff; padding: 2rem; border-radius: 12px; min-height: 60vh; }
+.settings input { width: 100%; padding: 0.8rem; margin: 0.5rem 0 1.5rem; border: 1px solid #ddd; border-radius: 6px; }
+.btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.5rem; border-radius: 6px; cursor: pointer; }
 
+/* 移动端适配 */
 @media (max-width: 768px) {
-    :root { --sidebar-width: 0px; }
-    .sidebar { transform: translateX(-100%); width: 260px; }
-    .sidebar.open { transform: translateX(0); box-shadow: 5px 0 15px rgba(0,0,0,0.2); }
-    .main-wrapper { margin-left: 0; }
-    .menu-toggle { display: block; }
-    .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 45; display: none; }
-    .sidebar-overlay.show { display: block; }
-    .content { padding: 1rem; }
+  :root { --sidebar-width: 0px; }
+  .sidebar { transform: translateX(-100%); width: 260px; }
+  .sidebar.open { transform: translateX(0); box-shadow: 5px 0 15px rgba(0,0,0,0.3); }
+  .main { margin-left: 0; }
+  .menu-btn { display: block; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 45; display: none; }
+  .overlay.show { display: block; }
+  .content { padding: 1rem; }
 }
 `;
 
-// 布局渲染
-function renderLayout(content: string, activeId: string, title: string) {
-  const nav = CATEGORIES.map(c => 
-    `<a href="/category/${c.id}" class="nav-item ${activeId===c.id?'active':''}"><i style="font-style:normal">${c.icon}</i> ${c.name}</a>`
+// --- 页面渲染 ---
+
+function render(bodyContent: string, activeId: string, title: string) {
+  const navItems = CATEGORIES.map(c => 
+    `<a href="/category/${c.id}" class="${activeId===c.id?'active':''}"><i style="font-style:normal">${c.icon}</i> ${c.name}</a>`
   ).join('');
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title}</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.6.1/github-markdown.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>${STYLES}</style>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${title} - Linux DO</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.6.1/github-markdown.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>${CSS}</style>
 </head>
 <body>
-    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
-    <nav class="sidebar" id="sidebar">
-        <div style="padding:1.5rem; color:white; font-weight:bold; border-bottom:1px solid rgba(255,255,255,0.1);">Linux DO Reader</div>
-        <div class="nav-links">
-            <a href="/" class="nav-item ${activeId==='home'?'active':''}"><i class="fas fa-home"></i> 首页</a>
-            ${nav}
-            <div style="margin:1rem 0; border-top:1px solid rgba(255,255,255,0.1);"></div>
-            <a href="/settings" class="nav-item ${activeId==='settings'?'active':''}"><i class="fas fa-cog"></i> 设置</a>
-        </div>
-    </nav>
-    <div class="main-wrapper">
-        <div class="top-bar">
-            <button class="menu-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
-            <h3>${title}</h3>
-            <div></div>
-        </div>
-        <div class="content">${content}</div>
+  <div class="overlay" onclick="toggle()"></div>
+  <nav class="sidebar" id="sb">
+    <div class="brand"><i class="fab fa-linux"></i> Linux DO Reader</div>
+    <div class="nav">
+      <a href="/" class="${activeId==='home'?'active':''}"><i class="fas fa-home"></i> 首页</a>
+      ${navItems}
+      <div style="margin:1rem 0; border-top:1px solid rgba(255,255,255,0.1)"></div>
+      <a href="/settings" class="${activeId==='settings'?'active':''}"><i class="fas fa-cog"></i> 设置</a>
     </div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/13.0.2/marked.min.js"></script>
-    <script>
-        function toggleSidebar() {
-            document.getElementById('sidebar').classList.toggle('open');
-            document.querySelector('.sidebar-overlay').classList.toggle('show');
-        }
-    </script>
-</body>
-</html>`;
+  </nav>
+  <div class="main">
+    <div class="header">
+      <button class="menu-btn" onclick="toggle()"><i class="fas fa-bars"></i></button>
+      <h3>${title}</h3>
+      <div></div>
+    </div>
+    <div class="content">${bodyContent}</div>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/13.0.2/marked.min.js"></script>
+  <script>
+    function toggle() {
+      document.getElementById('sb').classList.toggle('open');
+      document.querySelector('.overlay').classList.toggle('show');
+    }
+  </script>
+</body></html>`;
 }
 
-// --- 请求处理 ---
+// --- 主处理逻辑 ---
 
-async function handler(request: Request): Promise<Response> {
-  const url = new URL(request.url);
+async function handler(req: Request): Promise<Response> {
+  const url = new URL(req.url);
   const path = url.pathname;
 
-  // API
+  // API: Jina 代理
   if (path === "/api/jina") {
-    const targetUrl = url.searchParams.get("url");
-    if (!targetUrl) return new Response(JSON.stringify({ error: "URL required" }), { status: 400 });
-
-    const headers: Record<string, string> = {};
-    const jinaBase = request.headers.get("x-custom-jina-base") || DEFAULT_CONFIG.JINA_BASE_URL;
-    const jinaKey = request.headers.get("x-custom-jina-key") || DEFAULT_CONFIG.JINA_API_KEY;
-    if (jinaKey) headers["Authorization"] = `Bearer ${jinaKey}`;
+    const target = url.searchParams.get("url");
+    if (!target) return new Response("Miss URL", { status: 400 });
+    
+    const h: Record<string, string> = {};
+    const key = req.headers.get("x-key") || DEFAULT_CONFIG.JINA_API_KEY;
+    const base = req.headers.get("x-base") || DEFAULT_CONFIG.JINA_BASE_URL;
+    if (key) h["Authorization"] = `Bearer ${key}`;
 
     try {
-        let reqUrl = targetUrl.startsWith("http") 
-            ? (targetUrl.includes("jina.ai") ? targetUrl : `${jinaBase}/${targetUrl}`)
-            : `${jinaBase}/https://linux.do${targetUrl}`;
-            
-        const text = await proxyRequest(reqUrl, headers);
-        return new Response(JSON.stringify(parseJinaResponse(text)), { headers: { "Content-Type": "application/json" }});
+      const apiUrl = target.startsWith("http") 
+        ? (target.includes("jina.ai") ? target : `${base}/${target}`)
+        : `${base}/https://linux.do${target}`;
+      
+      const text = await proxyRequest(apiUrl, h);
+      
+      // 简单解析 Markdown
+      let md = text;
+      const idx = text.indexOf("Markdown Content:");
+      if (idx > -1) md = text.substring(idx + 17).trim();
+      
+      const titleM = text.match(/Title: (.+)/);
+      const dateM = text.match(/Published Time: (.+)/);
+      const urlM = text.match(/URL Source: (.+)/);
+
+      return new Response(JSON.stringify({
+        title: titleM ? titleM[1] : "详情",
+        date: dateM ? dateM[1] : "",
+        url: urlM ? urlM[1] : "",
+        markdown: md
+      }), { headers: { "Content-Type": "application/json" } });
     } catch (e: any) {
-        return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+      return new Response(JSON.stringify({ error: e.message }), { status: 500 });
     }
   }
 
   // Page: Settings
   if (path === "/settings") {
-      const html = `
-        <div class="settings-card">
-            <h2>设置</h2>
-            <label>Jina Base URL</label>
-            <input id="base" class="form-control" placeholder="${DEFAULT_CONFIG.JINA_BASE_URL}">
-            <label>Jina API Key</label>
-            <input id="key" class="form-control" placeholder="Optional">
-            <button onclick="save()" class="btn">保存</button>
-            <button onclick="reset()" class="btn" style="background:#ccc; margin-left:1rem;">重置</button>
-        </div>
-        <script>
-            document.addEventListener('DOMContentLoaded', () => {
-                const b = localStorage.getItem('r_base'), k = localStorage.getItem('r_key');
-                if(b) document.getElementById('base').value = b;
-                if(k) document.getElementById('key').value = k;
-            });
-            function save() {
-                const b = document.getElementById('base').value.trim();
-                const k = document.getElementById('key').value.trim();
-                b ? localStorage.setItem('r_base', b) : localStorage.removeItem('r_base');
-                k ? localStorage.setItem('r_key', k) : localStorage.removeItem('r_key');
-                alert('Saved');
-            }
-            function reset() { localStorage.clear(); location.reload(); }
-        </script>
-      `;
-      return new Response(renderLayout(html, "settings", "设置"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+    const html = `
+      <div class="reader settings">
+        <h2>设置</h2>
+        <label>Jina Base URL</label>
+        <input id="base" placeholder="${DEFAULT_CONFIG.JINA_BASE_URL}">
+        <label>API Key</label>
+        <input id="key" placeholder="Optional">
+        <button class="btn" onclick="save()">保存配置</button>
+        <button class="btn" onclick="reset()" style="background:#ccc;margin-left:1rem">重置</button>
+      </div>
+      <script>
+        const $ = id => document.getElementById(id);
+        $('base').value = localStorage.getItem('r_base') || '';
+        $('key').value = localStorage.getItem('r_key') || '';
+        function save() {
+          const b = $('base').value.trim(), k = $('key').value.trim();
+          b ? localStorage.setItem('r_base', b) : localStorage.removeItem('r_base');
+          k ? localStorage.setItem('r_key', k) : localStorage.removeItem('r_key');
+          alert('已保存');
+        }
+        function reset() { localStorage.clear(); location.reload(); }
+      </script>
+    `;
+    return new Response(render(html, "settings", "设置"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   }
 
   // Page: Topic Detail
   if (path.startsWith("/topic/")) {
-      const id = path.split("/")[2];
-      const html = `
-        <div class="reader-container">
-            <div style="margin-bottom:1rem;"><a href="javascript:history.back()" style="color:var(--primary); text-decoration:none;">&larr; 返回</a></div>
-            <div id="loader" style="text-align:center; padding:2rem;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>
-            <div id="error" style="display:none; color:red;"></div>
-            <div id="view" style="display:none;">
-                <h1 id="tt"></h1>
-                <div id="meta" style="color:#888; margin-bottom:1rem;"></div>
-                <div id="md" class="markdown-body"></div>
-            </div>
+    const id = path.split("/")[2];
+    const html = `
+      <div class="reader">
+        <div style="margin-bottom:1rem"><a href="javascript:history.back()" style="color:var(--primary);text-decoration:none">&larr; 返回列表</a></div>
+        <div id="load" style="text-align:center;padding:3rem"><i class="fas fa-spinner fa-spin fa-2x"></i></div>
+        <div id="err" style="display:none;color:red;padding:1rem"></div>
+        <div id="view" style="display:none">
+          <h1 id="tt" style="margin-bottom:0.5rem"></h1>
+          <div id="meta" style="color:#888;margin-bottom:2rem;font-size:0.9rem"></div>
+          <div id="md" class="markdown-body"></div>
         </div>
-        <script>
-            (async () => {
-                const h = {};
-                const b = localStorage.getItem('r_base'), k = localStorage.getItem('r_key');
-                if(b) h['x-custom-jina-base'] = b;
-                if(k) h['x-custom-jina-key'] = k;
-                try {
-                    const r = await fetch('/api/jina?url=' + encodeURIComponent('/t/topic/${id}'), { headers: h });
-                    const d = await r.json();
-                    if(d.error) throw new Error(d.error);
-                    document.getElementById('loader').style.display='none';
-                    document.getElementById('view').style.display='block';
-                    document.getElementById('tt').innerText=d.title;
-                    document.getElementById('meta').innerHTML=d.date + ' • <a href="'+d.url+'" target="_blank">原文</a>';
-                    document.getElementById('md').innerHTML=marked.parse(d.markdown);
-                } catch(e) {
-                    document.getElementById('loader').style.display='none';
-                    document.getElementById('error').style.display='block';
-                    document.getElementById('error').innerText = e.message;
-                }
-            })();
-        </script>
-      `;
-      return new Response(renderLayout(html, "topic", "详情"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+      </div>
+      <script>
+        (async () => {
+          const h = {};
+          const b = localStorage.getItem('r_base'), k = localStorage.getItem('r_key');
+          if(b) h['x-base'] = b; if(k) h['x-key'] = k;
+          try {
+            const r = await fetch('/api/jina?url=' + encodeURIComponent('/t/topic/${id}'), {headers:h});
+            const d = await r.json();
+            if(d.error) throw new Error(d.error);
+            document.getElementById('load').style.display='none';
+            document.getElementById('view').style.display='block';
+            document.getElementById('tt').innerText = d.title;
+            document.getElementById('meta').innerHTML = (d.date||'') + ' <a href="'+d.url+'" target="_blank">[原文]</a>';
+            document.getElementById('md').innerHTML = marked.parse(d.markdown);
+          } catch(e) {
+            document.getElementById('load').style.display='none';
+            document.getElementById('err').style.display='block';
+            document.getElementById('err').innerText = '加载失败: ' + e.message;
+          }
+        })();
+      </script>
+    `;
+    return new Response(render(html, "topic", "详情"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   }
 
-  // Page: RSS List
-  let catId = "latest", pageTitle = "最新话题";
+  // Page: List (RSS)
+  let catId = "latest", title = "最新话题";
   if (path.startsWith("/category/")) {
-      catId = path.split("/")[2];
-      const c = CATEGORIES.find(i => i.id === catId);
-      if (c) pageTitle = c.name;
+    catId = path.split("/")[2];
+    const c = CATEGORIES.find(x => x.id === catId);
+    if (c) title = c.name;
   }
 
   try {
-      const rssUrl = `${DEFAULT_CONFIG.RSS_BASE_URL}/${CATEGORIES.find(c => c.id === catId)?.file || 'latest.xml'}`;
-      const xml = await proxyRequest(rssUrl);
-      const items = parseRSS(xml);
-
-      const html = `
-        <div class="card-grid">
-            ${items.map(item => `
-                <div class="card">
-                    <div class="rss-title">
-                        <a href="/topic/${item.topicId}">${item.title}</a>
-                    </div>
-                    
-                    <!-- 
-                       重点：这里没有任何 escape 逻辑
-                       直接将 descriptionHTML 插入到 div 中
-                       CSS 类 .rss-html-content 会处理样式和隐藏不必要的元素
-                    -->
-                    <div class="rss-html-content">
-                        ${item.descriptionHTML}
-                    </div>
-                    
-                    <div class="rss-meta">
-                        <span>${item.creator || 'Unknown'}</span>
-                        <span>${new Date(item.pubDate).toLocaleDateString()}</span>
-                    </div>
-                    <a href="/topic/${item.topicId}" style="position:absolute; inset:0; z-index:2;"></a>
-                </div>
-            `).join('')}
-        </div>
-      `;
-      return new Response(renderLayout(html, catId, pageTitle), { headers: { "Content-Type": "text/html; charset=utf-8" }});
-  } catch (e) {
-      return new Response(renderLayout(`<p style="color:red">RSS Error: ${e.message}</p>`, catId, "Error"), { headers: { "Content-Type": "text/html" }});
+    const file = CATEGORIES.find(c => c.id === catId)?.file || "latest.xml";
+    const xml = await proxyRequest(`${DEFAULT_CONFIG.RSS_BASE_URL}/${file}`);
+    const items = parseRSS(xml);
+    
+    const html = `
+      <div class="grid">
+        ${items.map(item => `
+          <div class="card">
+            <div class="card-title">${item.title}</div>
+            <!-- 核心：直接输出反转义后的 HTML -->
+            <div class="card-body">
+              ${item.descriptionHTML}
+            </div>
+            <div class="card-meta">
+              <span>${item.creator}</span>
+              <span>${new Date(item.pubDate).toLocaleDateString()}</span>
+            </div>
+            <a href="/topic/${item.topicId}" class="card-link"></a>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    return new Response(render(html, catId, title), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+  } catch (e: any) {
+    return new Response(render(`<div style="color:red">RSS Error: ${e.message}</div>`, catId, "Error"), { headers: { "Content-Type": "text/html" }});
   }
 }
 
-console.log("Service on http://localhost:8000");
+console.log("Service running on http://localhost:8000");
 serve(handler, { port: 8000 });
