@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
-// --- 配置与常量 ---
+// --- 配置 ---
 const DEFAULT_CONFIG = {
   RSS_BASE_URL: Deno.env.get("RSS_BASE_URL") || "https://linuxdorss.longpink.com",
   JINA_BASE_URL: Deno.env.get("JINA_BASE_URL") || "https://r.jina.ai",
@@ -22,8 +22,9 @@ const CATEGORIES = [
   { id: "feedback", name: "运营反馈", icon: "📊", file: "feedback.xml" },
 ];
 
-// --- 核心工具 ---
+// --- 工具函数 ---
 
+// 反转义 HTML 实体 (防止源码泄露)
 function unescapeHTML(str: string) {
   if (!str) return "";
   return str
@@ -34,6 +35,7 @@ function unescapeHTML(str: string) {
     .replace(/&amp;/g, "&");
 }
 
+// RSS 解析 (只提取 HTML，不转换 Markdown)
 function parseRSS(xml: string) {
   const items: any[] = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
@@ -42,10 +44,12 @@ function parseRSS(xml: string) {
   while ((match = itemRegex.exec(xml)) !== null) {
     const itemBlock = match[1];
     const extract = (tagName: string) => {
+      // 1. 尝试 CDATA (Raw HTML)
       const cdataRegex = new RegExp(`<${tagName}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*<\\/${tagName}>`, "i");
       const cdataMatch = itemBlock.match(cdataRegex);
-      if (cdataMatch) return cdataMatch[1]; // 返回原始内容，不做任何处理，交给前端 marked
+      if (cdataMatch) return cdataMatch[1];
 
+      // 2. 尝试普通内容 (需反转义)
       const normalRegex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, "i");
       const normalMatch = itemBlock.match(normalRegex);
       if (normalMatch) return unescapeHTML(normalMatch[1]); 
@@ -61,8 +65,7 @@ function parseRSS(xml: string) {
         title: extract("title"),
         link: link,
         topicId: topicIdMatch[1],
-        // 将内容存为 contentRaw，稍后在前端渲染
-        contentRaw: extract("description"), 
+        descriptionHTML: extract("description"), // 直接使用 HTML
         pubDate: extract("pubDate"),
         creator: extract("dc:creator") || "Linux Do",
       });
@@ -73,152 +76,133 @@ function parseRSS(xml: string) {
 
 async function proxyRequest(url: string, headers: Record<string, string> = {}) {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/8.0", ...headers } });
-    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/9.0", ...headers } });
+    if (!res.ok) throw new Error(`Status ${res.status}`);
     return await res.text();
   } catch (e) {
-    console.error("Fetch error:", e);
-    throw e;
+    console.error(e); throw e;
   }
 }
 
-// --- 样式 (CSS) ---
+// --- CSS (核心防御布局) ---
 
 const CSS = `
 :root {
   --sidebar-width: 260px;
   --primary: #7c3aed;
-  --primary-light: #ddd6fe;
+  --primary-bg: #f3e8ff;
   --bg: #f3f4f6;
   --card-bg: #fff;
   --text: #374151;
-  --gray: #9ca3af;
+  --gray: #6b7280;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
 
 /* Sidebar */
 .sidebar { 
-    width: var(--sidebar-width); 
-    background: #1e1e2e; 
-    color: #a6adc8; 
-    position: fixed; 
-    inset: 0 auto 0 0; 
-    z-index: 100; 
-    overflow-y: auto; 
-    transform: translateX(-100%); 
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    width: var(--sidebar-width); background: #1e1e2e; color: #a6adc8; 
+    position: fixed; inset: 0 auto 0 0; z-index: 100; overflow-y: auto; 
+    transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .sidebar.open { transform: translateX(0); box-shadow: 0 0 50px rgba(0,0,0,0.5); }
-.brand { padding: 1.5rem; color: #fff; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 10px; }
-.nav a { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: inherit; text-decoration: none; transition: all 0.2s; }
+.brand { padding: 1.5rem; color: #fff; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; gap: 10px; align-items: center; }
+.nav a { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: inherit; text-decoration: none; }
 .nav a:hover, .nav a.active { background: rgba(255,255,255,0.1); color: #fff; }
 .nav a.active { border-left: 3px solid var(--primary); background: rgba(124, 58, 237, 0.1); }
 .nav i { width: 24px; margin-right: 8px; text-align: center; }
-
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; backdrop-filter: blur(2px); }
 .overlay.show { opacity: 1; pointer-events: auto; }
 
 /* Main */
 .main { flex: 1; width: 100%; margin-left: 0; min-width: 0; }
 .header { background: #fff; padding: 0.8rem 1.5rem; position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
-.menu-btn { display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid #e5e7eb; cursor: pointer; width: 40px; height: 40px; border-radius: 8px; color: var(--text); }
-.menu-btn:hover { background: #f3f4f6; }
+.menu-btn { width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; background: transparent; border: 1px solid #e5e7eb; border-radius: 8px; color: var(--text); cursor: pointer; }
 .content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
 
 /* Grid & Card */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; align-items: start; }
 .card { 
-    background: var(--card-bg); 
-    border-radius: 12px; 
-    padding: 1.5rem; 
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05); 
-    display: flex; 
-    flex-direction: column; 
-    position: relative; 
-    transition: transform 0.2s; 
-    overflow: hidden; /* 这里的 hidden 是为了圆角，不是截断内容 */
+    background: var(--card-bg); border-radius: 12px; padding: 1.5rem; 
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; 
+    position: relative; transition: transform 0.2s; overflow: hidden; /* 防止圆角溢出 */
 }
 .card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
-
 .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; line-height: 1.4; }
 
-/* Card Body - 布局防御核心 */
+/* --- 核心：Card Body 防御性 CSS --- */
 .card-body {
-  font-size: 0.95rem;
-  color: #4b5563;
-  line-height: 1.6;
-  margin-bottom: 1rem;
-  word-wrap: break-word; /* 长单词换行 */
-  overflow-wrap: break-word;
+    font-size: 0.95rem;
+    color: #4b5563;
+    line-height: 1.6;
+    margin-bottom: 1rem;
+    /* 强制文字换行，防止长串撑开 */
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
-/* 强制限制卡片内所有子元素宽度，防止 Markdown 表格/代码块撑破 */
-.card-body * { max-width: 100% !important; box-sizing: border-box; }
-.card-body pre { 
-    background: #f8fafc; 
-    padding: 10px; 
-    border-radius: 6px; 
-    overflow-x: auto; /* 代码块横向滚动 */
+/* 1. 限制所有子元素宽度 */
+.card-body * {
+    max-width: 100% !important;
+    box-sizing: border-box;
+}
+
+/* 2. 图片自适应 */
+.card-body img {
+    display: block;
+    height: auto;
+    border-radius: 6px;
+    margin: 10px 0;
+    background: #f3f4f6; /* 图片加载前的占位色 */
+}
+
+/* 3. 代码块与表格：允许内部横向滚动，但不撑开卡片 */
+.card-body pre, 
+.card-body table {
+    display: block;
+    width: 100%;
+    overflow-x: auto; /* 关键：内部滚动 */
+    background: #f8fafc;
+    border-radius: 6px;
     border: 1px solid #eee;
+    margin: 10px 0;
 }
-.card-body img { display: block; height: auto; border-radius: 6px; margin: 0.8rem 0; }
-.card-body table { display: block; overflow-x: auto; width: 100%; border-collapse: collapse; }
-.card-body th, .card-body td { border: 1px solid #ddd; padding: 6px; }
+.card-body pre { padding: 10px; }
+.card-body table { border-collapse: collapse; }
+.card-body th, .card-body td { border: 1px solid #ddd; padding: 6px; white-space: nowrap; }
 
-/* 隐藏干扰元素 */
+/* 4. 隐藏不需要的元数据 */
 .card-body small, .card-body a[href*="topic"] { display: none !important; }
-.card-body a { pointer-events: none; text-decoration: none; color: inherit; } /* 正文里的链接不可点 */
+.card-body br { display: block; content: ""; margin-bottom: 6px; }
 
+/* 5. 禁止正文链接交互 (防止误点) */
+.card-body a { pointer-events: none; color: inherit; text-decoration: none; }
+
+
+/* Meta Info */
 .card-meta { margin-top: auto; padding-top: 1rem; border-top: 1px solid #e5e7eb; font-size: 0.85rem; color: var(--gray); display: flex; justify-content: space-between; margin-bottom: 1rem; }
 
-/* Action Bar (新) */
-.action-bar {
-    display: flex;
-    gap: 10px;
-    margin-top: 0.5rem;
-    position: relative;
-    z-index: 10; /* 提高层级，确保可点 */
-}
-
+/* Action Buttons */
+.action-bar { display: flex; gap: 10px; position: relative; z-index: 10; }
 .btn-action {
-    flex: 1;
-    padding: 0.6rem;
-    border-radius: 6px;
-    border: 1px solid #e5e7eb;
-    background: white;
-    color: var(--text);
-    font-size: 0.9rem;
-    cursor: pointer;
-    text-align: center;
-    text-decoration: none;
-    transition: all 0.2s;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
+    flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 0.7rem; border-radius: 8px; text-decoration: none; font-size: 0.9rem; cursor: pointer; transition: all 0.2s;
+    border: 1px solid #e5e7eb; background: white; color: var(--text);
 }
+.btn-action.primary { background: var(--primary-bg); color: var(--primary); border-color: transparent; font-weight: 500; }
+.btn-action:hover { filter: brightness(0.95); transform: translateY(-1px); }
 
-.btn-action.primary {
-    background: var(--primary-light);
-    color: var(--primary);
-    border-color: var(--primary-light);
-    font-weight: 500;
-}
-.btn-action:hover { filter: brightness(0.95); }
-
-/* 全卡片点击区域 (调整层级，不覆盖按钮) */
+/* 全卡片点击覆盖层 (z-index:1，低于按钮的10) */
 .card-link { position: absolute; inset: 0; z-index: 1; }
 
-/* Reader */
-.reader { background: #fff; padding: 2rem; border-radius: 12px; min-height: 60vh; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+/* Reader & Forms */
+.reader { background: #fff; padding: 2rem; border-radius: 12px; min-height: 60vh; }
 .form-input { width: 100%; padding: 0.8rem; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1rem; }
 .btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.5rem; border-radius: 8px; cursor: pointer; }
-
 @media (max-width: 768px) { .content { padding: 1rem; } }
 `;
 
-// --- 页面渲染 ---
+// --- 模板渲染 ---
 
 function render(bodyContent: string, activeId: string, title: string) {
   const navItems = CATEGORIES.map(c => 
@@ -256,10 +240,7 @@ function render(bodyContent: string, activeId: string, title: string) {
   </div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/13.0.2/marked.min.js"></script>
   <script>
-    function toggle() {
-      document.getElementById('sb').classList.toggle('open');
-      document.querySelector('.overlay').classList.toggle('show');
-    }
+    function toggle() { document.getElementById('sb').classList.toggle('open'); document.querySelector('.overlay').classList.toggle('show'); }
   </script>
 </body></html>`;
 }
@@ -269,7 +250,7 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
       <div class="reader">
         <div style="margin-bottom:1rem"><a href="${backLink}" style="color:var(--primary);text-decoration:none"><i class="fas fa-arrow-left"></i> ${backText}</a></div>
         <div id="load" style="text-align:center;padding:4rem"><i class="fas fa-spinner fa-spin fa-3x" style="color:#ddd"></i></div>
-        <div id="err" style="display:none;color:red;padding:1rem;background:#fee2e2;border-radius:8px"></div>
+        <div id="err" style="display:none;color:#dc2626;padding:1rem;background:#fee2e2;border-radius:8px"></div>
         <div id="view" style="display:none">
           <h1 id="tt" style="margin-bottom:0.5rem"></h1>
           <div id="meta" style="color:#888;margin-bottom:2rem;border-bottom:1px solid #eee;padding-bottom:1rem"></div>
@@ -301,7 +282,7 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
     `;
 }
 
-// --- Handler ---
+// --- Main Handler ---
 
 async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
@@ -317,29 +298,21 @@ async function handler(req: Request): Promise<Response> {
     if (key) h["Authorization"] = `Bearer ${key}`;
 
     try {
-      const apiUrl = target.startsWith("http") 
-        ? (target.includes("jina.ai") ? target : `${base}/${target}`)
-        : `${base}/https://linux.do${target}`;
-      
+      const apiUrl = target.startsWith("http") ? (target.includes("jina.ai") ? target : `${base}/${target}`) : `${base}/https://linux.do${target}`;
       const text = await proxyRequest(apiUrl, h);
       let md = text;
       const idx = text.indexOf("Markdown Content:");
       if (idx > -1) md = text.substring(idx + 17).trim();
       
-      const tM = text.match(/Title: (.+)/), dM = text.match(/Published Time: (.+)/), uM = text.match(/URL Source: (.+)/);
-      return new Response(JSON.stringify({
-        title: tM ? tM[1] : "Reader",
-        date: dM ? dM[1] : "",
-        url: uM ? uM[1] : target,
-        markdown: md
-      }), { headers: { "Content-Type": "application/json" } });
+      const t = text.match(/Title: (.+)/), d = text.match(/Published Time: (.+)/), u = text.match(/URL Source: (.+)/);
+      return new Response(JSON.stringify({ title: t?t[1]:"Reader", date: d?d[1]:"", url: u?u[1]:target, markdown: md }), { headers: { "Content-Type": "application/json" } });
     } catch (e: any) {
       return new Response(JSON.stringify({ error: e.message }), { status: 500 });
     }
   }
 
   if (path === "/browser") {
-      const html = `
+    const html = `
         <div class="reader" style="text-align:center; padding-top:4rem;">
             <i class="fas fa-compass" style="font-size:4rem; color:var(--primary); margin-bottom:2rem;"></i>
             <h1>Jina 浏览器</h1>
@@ -353,12 +326,12 @@ async function handler(req: Request): Promise<Response> {
             document.getElementById('u').addEventListener('keypress', e => { if(e.key==='Enter') go() });
         </script>
       `;
-      return new Response(render(html, "browser", "Jina 浏览器"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+    return new Response(render(html, "browser", "Jina 浏览器"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   }
 
   if (path === "/read") {
-      const target = url.searchParams.get("url") || "";
-      return new Response(render(renderReaderScript(`'${target}'`, '/browser', '返回'), "browser", "阅读"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+    const target = url.searchParams.get("url") || "";
+    return new Response(render(renderReaderScript(`'${target}'`, '/browser', '返回'), "browser", "阅读"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   }
 
   if (path === "/settings") {
@@ -366,7 +339,7 @@ async function handler(req: Request): Promise<Response> {
       <div class="reader settings">
         <h2>设置</h2>
         <input id="base" class="form-input" placeholder="${DEFAULT_CONFIG.JINA_BASE_URL}">
-        <input id="key" class="form-input" placeholder="API Key (Optional)">
+        <input id="key" class="form-input" placeholder="API Key">
         <button class="btn" onclick="save()">保存</button>
         <button class="btn" onclick="reset()" style="background:#ccc;margin-left:1rem">重置</button>
       </div>
@@ -405,22 +378,18 @@ async function handler(req: Request): Promise<Response> {
     
     const html = `
       <div class="grid">
-        ${items.map(item => {
-            // 技巧：将 raw description 放入 textarea 隐藏起来，
-            // 然后让客户端 JS 读取并用 marked 渲染，确保布局安全
-            const safeId = `desc-${Math.random().toString(36).substr(2, 9)}`;
-            return `
+        ${items.map(item => `
           <div class="card">
             <div class="card-title">${item.title}</div>
-            
-            <div class="card-body" id="${safeId}"></div>
-            <textarea id="raw-${safeId}" style="display:none">${item.contentRaw}</textarea>
-            
+            <!-- 1. 直接输出 Raw HTML -->
+            <div class="card-body">
+              ${item.descriptionHTML}
+            </div>
             <div class="card-meta">
               <span>${item.creator}</span>
               <span>${new Date(item.pubDate).toLocaleDateString()}</span>
             </div>
-            
+            <!-- 2. 新增操作栏 -->
             <div class="action-bar">
                 <a href="/topic/${item.topicId}" class="btn-action primary">
                     <i class="fas fa-book-open"></i> Jina 浏览
@@ -429,23 +398,11 @@ async function handler(req: Request): Promise<Response> {
                     <i class="fas fa-external-link-alt"></i> 阅读原文
                 </a>
             </div>
-
-            <!-- 全卡片点击，优先级较低 (z-index:1)，会覆盖卡片空白处，但不会覆盖 z-index:10 的按钮 -->
+            <!-- 3. 覆盖层 (不挡按钮) -->
             <a href="/topic/${item.topicId}" class="card-link"></a>
           </div>
-        `}).join('')}
+        `).join('')}
       </div>
-      <script>
-        // 客户端渲染所有 description
-        document.addEventListener('DOMContentLoaded', () => {
-            document.querySelectorAll('.card-body').forEach(el => {
-                const id = el.id;
-                const raw = document.getElementById('raw-' + id).value;
-                // 使用 marked 渲染，CSS 会处理 overflow
-                el.innerHTML = marked.parse(raw);
-            });
-        });
-      </script>
     `;
     return new Response(render(html, catId, title), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   } catch (e: any) {
@@ -453,5 +410,5 @@ async function handler(req: Request): Promise<Response> {
   }
 }
 
-console.log("http://localhost:8000");
+console.log("Service running on http://localhost:8000");
 serve(handler, { port: 8000 });
