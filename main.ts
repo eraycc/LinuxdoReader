@@ -24,8 +24,6 @@ const CATEGORIES = [
 
 // --- 核心工具函数 ---
 
-// 1. HTML 反转义工具 (核心修复点)
-// 能够将 &lt;p&gt; 变回 <p>，确保浏览器渲染而不是显示源码
 function unescapeHTML(str: string) {
   if (!str) return "";
   return str
@@ -36,33 +34,27 @@ function unescapeHTML(str: string) {
     .replace(/&amp;/g, "&");
 }
 
-// 2. RSS 解析器 (重构版)
 function parseRSS(xml: string) {
   const items: any[] = [];
-  // 使用非贪婪匹配捕获 item
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
   let match;
 
   while ((match = itemRegex.exec(xml)) !== null) {
     const itemBlock = match[1];
 
-    // 提取函数：优先处理 CDATA，如果没有则处理普通文本，最后必须反转义
     const extract = (tagName: string) => {
-      // 尝试匹配 <tag><![CDATA[content]]></tag>
       const cdataRegex = new RegExp(`<${tagName}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*<\\/${tagName}>`, "i");
       const cdataMatch = itemBlock.match(cdataRegex);
-      if (cdataMatch) return cdataMatch[1]; // CDATA 内容通常已经是 Raw HTML
+      if (cdataMatch) return cdataMatch[1];
 
-      // 尝试匹配 <tag>content</tag>
       const normalRegex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, "i");
       const normalMatch = itemBlock.match(normalRegex);
-      if (normalMatch) return unescapeHTML(normalMatch[1]); // 普通内容可能是转义过的，需要反转义
+      if (normalMatch) return unescapeHTML(normalMatch[1]);
 
       return "";
     };
 
     const link = extract("link").trim();
-    // 提取 Topic ID
     const topicIdMatch = link.match(/\/topic\/(\d+)/);
 
     if (link && topicIdMatch) {
@@ -70,7 +62,6 @@ function parseRSS(xml: string) {
         title: extract("title"),
         link: link,
         topicId: topicIdMatch[1],
-        // 这里的 descriptionHTML 现在绝对是 <p>...</p> 格式的真 HTML
         descriptionHTML: extract("description"), 
         pubDate: extract("pubDate"),
         creator: extract("dc:creator") || "Linux Do",
@@ -80,7 +71,6 @@ function parseRSS(xml: string) {
   return items;
 }
 
-// 3. 网络请求封装
 async function proxyRequest(url: string, headers: Record<string, string> = {}) {
   try {
     const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/6.0", ...headers } });
@@ -106,7 +96,7 @@ const CSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
 
-/* 侧边栏 */
+/* Sidebar */
 .sidebar { width: var(--sidebar-width); background: #1e1e2e; color: #a6adc8; position: fixed; inset: 0 auto 0 0; z-index: 50; overflow-y: auto; transition: transform 0.3s; }
 .brand { padding: 1.5rem; color: #fff; font-weight: bold; font-size: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .nav a { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: inherit; text-decoration: none; }
@@ -114,62 +104,81 @@ body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg);
 .nav a.active { border-left: 3px solid var(--primary); }
 .nav i { width: 24px; margin-right: 8px; }
 
-/* 主区域 */
+/* Main */
 .main { margin-left: var(--sidebar-width); flex: 1; width: 100%; transition: margin-left 0.3s; }
 .header { background: #fff; padding: 1rem 2rem; position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
 .content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
 .menu-btn { display: none; background: none; border: none; font-size: 1.2rem; cursor: pointer; }
 
-/* 卡片布局 */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
-.card { background: var(--card-bg); border-radius: 12px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; position: relative; overflow: hidden; transition: transform 0.2s; }
+/* Grid & Card */
+/* 
+  改动：对于长内容，瀑布流布局（Masonry）在纯 CSS Grid 下比较难做完美的等高对齐。
+  如果内容非常长，卡片会变得很高。这是符合你"显示完整内容"需求的。
+*/
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; align-items: start; }
+
+.card { 
+    background: var(--card-bg); 
+    border-radius: 12px; 
+    padding: 1.5rem; 
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05); 
+    display: flex; 
+    flex-direction: column; 
+    position: relative; 
+    overflow: hidden; /* 保持圆角 */
+    transition: transform 0.2s; 
+}
 .card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
 
 .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; line-height: 1.4; }
-.card-title a { color: var(--text); text-decoration: none; }
 
-/* --- 核心：Description HTML 渲染修正 --- */
+/* --- 核心改动：.card-body 完全放开限制 --- */
 .card-body {
   font-size: 0.95rem;
   color: #4b5563;
   line-height: 1.6;
   margin-bottom: 1rem;
-  max-height: 260px; /* 防止过长 */
-  overflow: hidden;
-  position: relative;
-  /* 底部遮罩 */
-  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent);
-  mask-image: linear-gradient(180deg, #000 70%, transparent);
+  
+  /* 1. 移除 max-height，高度自适应 */
+  /* max-height: 260px;  <-- Removed */
+  
+  /* 2. 移除 overflow hidden，允许内容延伸 */
+  /* overflow: hidden;   <-- Removed */
+  
+  /* 3. 移除 mask-image 遮罩 */
+  /* -webkit-mask-image: ...; <-- Removed */
+  /* mask-image: ...;         <-- Removed */
 }
 
-/* 强制控制 RSS 内部 HTML 元素的样式 */
-.card-body p { margin-bottom: 0.5rem; }
+/* 内部元素样式 */
+.card-body p { margin-bottom: 0.8rem; }
+
+/* 图片依然保持宽度自适应，防止撑破卡片宽度 */
 .card-body img { 
   display: block; 
   max-width: 100%; 
   height: auto; 
-  max-height: 180px; /* 限制图片高度 */
-  object-fit: cover; 
   border-radius: 6px; 
-  margin: 0.5rem 0; 
+  margin: 0.8rem 0; 
 }
-/* 隐藏不需要的元素 */
+
+/* 依然隐藏不需要的统计信息和链接 */
 .card-body small, 
 .card-body a[href*="topic"] { display: none !important; }
-.card-body br { display: none; }
+.card-body br { display: block; content: ""; margin-bottom: 0.5rem; }
 
-/* 禁止卡片内链接点击，全卡片响应 */
+/* 禁止卡片内链接点击 */
 .card-body a { pointer-events: none; text-decoration: none; color: inherit; }
 
-.card-meta { margin-top: auto; padding-top: 0.8rem; border-top: 1px solid #e5e7eb; font-size: 0.85rem; color: var(--gray); display: flex; justify-content: space-between; }
+.card-meta { margin-top: auto; padding-top: 1rem; border-top: 1px solid #e5e7eb; font-size: 0.85rem; color: var(--gray); display: flex; justify-content: space-between; }
 .card-link { position: absolute; inset: 0; z-index: 10; }
 
-/* 其他页面 */
+/* Other */
 .reader { background: #fff; padding: 2rem; border-radius: 12px; min-height: 60vh; }
 .settings input { width: 100%; padding: 0.8rem; margin: 0.5rem 0 1.5rem; border: 1px solid #ddd; border-radius: 6px; }
 .btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.5rem; border-radius: 6px; cursor: pointer; }
 
-/* 移动端适配 */
+/* Mobile */
 @media (max-width: 768px) {
   :root { --sidebar-width: 0px; }
   .sidebar { transform: translateX(-100%); width: 260px; }
@@ -233,7 +242,6 @@ async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
-  // API: Jina 代理
   if (path === "/api/jina") {
     const target = url.searchParams.get("url");
     if (!target) return new Response("Miss URL", { status: 400 });
@@ -250,7 +258,6 @@ async function handler(req: Request): Promise<Response> {
       
       const text = await proxyRequest(apiUrl, h);
       
-      // 简单解析 Markdown
       let md = text;
       const idx = text.indexOf("Markdown Content:");
       if (idx > -1) md = text.substring(idx + 17).trim();
@@ -270,7 +277,6 @@ async function handler(req: Request): Promise<Response> {
     }
   }
 
-  // Page: Settings
   if (path === "/settings") {
     const html = `
       <div class="reader settings">
@@ -298,7 +304,6 @@ async function handler(req: Request): Promise<Response> {
     return new Response(render(html, "settings", "设置"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   }
 
-  // Page: Topic Detail
   if (path.startsWith("/topic/")) {
     const id = path.split("/")[2];
     const html = `
@@ -337,7 +342,6 @@ async function handler(req: Request): Promise<Response> {
     return new Response(render(html, "topic", "详情"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   }
 
-  // Page: List (RSS)
   let catId = "latest", title = "最新话题";
   if (path.startsWith("/category/")) {
     catId = path.split("/")[2];
@@ -355,7 +359,6 @@ async function handler(req: Request): Promise<Response> {
         ${items.map(item => `
           <div class="card">
             <div class="card-title">${item.title}</div>
-            <!-- 核心：直接输出反转义后的 HTML -->
             <div class="card-body">
               ${item.descriptionHTML}
             </div>
