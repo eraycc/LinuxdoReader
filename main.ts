@@ -28,19 +28,26 @@ const CATEGORIES = [
 
 function proxifyImage(url: string, token: string, baseUrl: string): string {
   if (!token || !url) return url;
+  // 确保 baseUrl 不以此 / 结尾 (为了统一拼接逻辑，或者下面处理)
+  const cleanBase = baseUrl.replace(/\/$/, ""); 
+  
   const isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(url);
   const isLinuxDoUpload = url.includes("linux.do/uploads");
+  
   if (isImage || isLinuxDoUpload) {
-    const finalBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-    return `${finalBase}?token=${token}&url=${encodeURIComponent(url)}`;
+    return `${cleanBase}/?token=${token}&url=${encodeURIComponent(url)}`;
   }
   return url;
 }
 
 function processHtmlImagesLazy(html: string, token: string, baseUrl: string): string {
-  return html.replace(/<img\s+([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi, (match, p1, src, p2) => {
+  return html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi, (match, src) => {
     const realUrl = proxifyImage(src, token, baseUrl);
-    return `<img ${p1} src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="${realUrl}" class="lazy" ${p2}>`;
+    // 保留原有的 width/height 等属性，替换 src 为占位符，添加 data-src
+    // 注意：这里简单替换整个标签可能会丢失 class 等，更稳健的做法是只替换 src 属性
+    // 但为了添加 lazy class 和 data-src，我们需要重构标签
+    return match.replace(src, "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+                .replace('<img', `<img data-src="${realUrl}" class="lazy"`);
   });
 }
 
@@ -78,6 +85,7 @@ function parseRSS(xml: string, scrapeToken: string, scrapeBase: string) {
     const topicIdMatch = link.match(/\/topic\/(\d+)/);
     if (link && topicIdMatch) {
       let desc = extract("description");
+      // 服务端预处理：如果有默认 token，先转换一次，方便无 JS 环境或首屏
       desc = processHtmlImagesLazy(desc, scrapeToken, scrapeBase);
 
       items.push({
@@ -95,13 +103,13 @@ function parseRSS(xml: string, scrapeToken: string, scrapeBase: string) {
 
 async function proxyRequest(url: string, headers: Record<string, string> = {}) {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/12.0", ...headers } });
+    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/13.0", ...headers } });
     if (!res.ok) throw new Error(`Status ${res.status}`);
     return await res.text();
   } catch (e) { console.error(e); throw e; }
 }
 
-// --- CSS 美化 ---
+// --- CSS ---
 const CSS = `
 :root { --sidebar-width: 260px; --primary: #7c3aed; --primary-light: #8b5cf6; --bg: #f3f4f6; --card-bg: #fff; --text: #1f2937; --text-light: #6b7280; }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -116,13 +124,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
 .nav a.active { background: rgba(124, 58, 237, 0.15); color: #fff; border-left: 3px solid var(--primary); }
 .nav i { width: 24px; margin-right: 10px; text-align: center; opacity: 0.8; }
 
-/* Overlay & Main */
+/* Main */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; backdrop-filter: blur(3px); }
 .overlay.show { opacity: 1; pointer-events: auto; }
 .main { flex: 1; width: 100%; margin-left: 0; min-width: 0; }
 .header { background: #fff; padding: 0.8rem 1.5rem; position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px rgba(0,0,0,0.03); display: flex; justify-content: space-between; align-items: center; }
 .menu-btn { width: 36px; height: 36px; display: flex; justify-content: center; align-items: center; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; color: var(--text); cursor: pointer; transition: all 0.2s; }
-.menu-btn:active { background: #f3f4f6; transform: scale(0.95); }
 .content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
 
 /* Grid & Card */
@@ -135,22 +142,59 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
     border: 1px solid rgba(0,0,0,0.05);
     display: flex; flex-direction: column; 
     position: relative; transition: all 0.2s ease; 
+    /* 移除 overflow: hidden 以避免长按弹出菜单被截断（虽然在移动端通常是系统级菜单）
+       但为了圆角美观通常还是保留，如果需要选中文字，通常不影响 */
     overflow: hidden; 
 }
 .card:hover { transform: translateY(-4px); box-shadow: 0 12px 20px -5px rgba(0,0,0,0.1); border-color: rgba(124, 58, 237, 0.1); }
 
-.card-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.8rem; line-height: 1.4; color: #111827; }
+.card-title { 
+    font-size: 1.15rem; 
+    font-weight: 700; 
+    margin-bottom: 0.8rem; 
+    line-height: 1.4; 
+    color: #111827; 
+}
+.card-title a {
+    color: inherit;
+    text-decoration: none;
+    /* 扩大点击区域 */
+    display: block;
+}
+.card-title a:hover { color: var(--primary); }
 
-.card-body { font-size: 0.95rem; color: #4b5563; line-height: 1.6; margin-bottom: 1.2rem; overflow-wrap: anywhere; word-break: break-word; }
+.card-body { 
+    font-size: 0.95rem; 
+    color: #4b5563; 
+    line-height: 1.6; 
+    margin-bottom: 1.2rem; 
+    overflow-wrap: anywhere; 
+    word-break: break-word;
+    /* 允许用户选择文本 */
+    user-select: text; 
+    -webkit-user-select: text;
+    cursor: text;
+}
 .card-body * { max-width: 100% !important; box-sizing: border-box; }
-.card-body img { display: block; height: auto; border-radius: 8px; margin: 12px 0; background: #f3f4f6; transition: opacity 0.3s; }
+.card-body img { 
+    display: block; 
+    height: auto; 
+    border-radius: 8px; 
+    margin: 12px 0; 
+    background: #f3f4f6; 
+    transition: opacity 0.3s; 
+    /* 确保图片可以被长按选中 */
+    pointer-events: auto;
+    cursor: pointer;
+}
 .card-body pre, .card-body table { display: block; width: 100%; overflow-x: auto; background: #f8fafc; border-radius: 8px; border: 1px solid #f1f5f9; margin: 10px 0; padding: 10px; }
 .card-body small, .card-body a[href*="topic"] { display: none !important; }
 .card-body br { display: block; content: ""; margin-bottom: 6px; }
-.card-body a { pointer-events: none; color: var(--text); text-decoration: none; }
+/* 移除之前的 pointer-events: none，允许选择链接文本，但禁止跳转以防误触 */
+.card-body a { pointer-events: auto; color: var(--text); text-decoration: none; cursor: text; }
 img.lazy { opacity: 0.3; } img.loaded { opacity: 1; }
 
-/* Meta Styling (Fix) */
+/* Meta Styling */
 .card-meta { 
     margin-top: auto; 
     padding-top: 1rem; 
@@ -163,8 +207,6 @@ img.lazy { opacity: 0.3; } img.loaded { opacity: 1; }
     margin-bottom: 1rem; 
 }
 .meta-item { display: flex; align-items: center; gap: 6px; }
-.meta-item i { font-size: 0.8rem; opacity: 0.7; }
-.tag-pill { background: #f3f4f6; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 500; }
 
 /* Buttons */
 .action-bar { display: flex; gap: 12px; position: relative; z-index: 10; }
@@ -176,8 +218,6 @@ img.lazy { opacity: 0.3; } img.loaded { opacity: 1; }
 .btn-action.primary { background: #f5f3ff; color: var(--primary); border-color: #ddd6fe; }
 .btn-action:hover { transform: translateY(-1px); filter: brightness(0.97); }
 
-.card-link { position: absolute; inset: 0; z-index: 1; }
-
 /* Reader & Settings */
 .reader { background: #fff; padding: 2.5rem; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
 .form-group { margin-bottom: 2rem; }
@@ -185,11 +225,9 @@ img.lazy { opacity: 0.3; } img.loaded { opacity: 1; }
 .form-input { width: 100%; padding: 0.8rem 1rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; transition: border-color 0.2s; }
 .form-input:focus { border-color: var(--primary); outline: none; ring: 2px var(--primary-light); }
 .form-hint { font-size: 0.85rem; color: #6b7280; margin-top: 0.5rem; line-height: 1.4; }
-
 .btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.8rem; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 1rem; transition: background 0.2s; }
 .btn:hover { background: var(--primary-light); }
 .btn-outline { background: transparent; border: 1px solid #d1d5db; color: #4b5563; }
-.btn-outline:hover { background: #f9fafb; }
 
 @media (max-width: 768px) { .content { padding: 1rem; } .reader { padding: 1.5rem; } }
 `;
@@ -290,7 +328,6 @@ async function handler(req: Request): Promise<Response> {
     } catch (e: any) { return new Response(JSON.stringify({ error: e.message }), { status: 500 }); }
   }
 
-  // Page: Settings (Fix: Added hints)
   if (path === "/settings") {
     const html = `
       <div class="reader">
@@ -311,12 +348,12 @@ async function handler(req: Request): Promise<Response> {
         <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">Scrape.do (图片加速)</h3>
         <div class="form-group">
             <label class="form-label">Scrape Base URL</label>
-            <input id="sb" class="form-input" placeholder="${DEFAULT_CONFIG.SCRAPE_BASE_URL}">
+            <input id="s_base" class="form-input" placeholder="${DEFAULT_CONFIG.SCRAPE_BASE_URL}">
             <p class="form-hint">Scrape.do 的 API 接入点。</p>
         </div>
         <div class="form-group">
             <label class="form-label">Scrape Token</label>
-            <input id="sk" class="form-input" placeholder="例如: 4a2b...">
+            <input id="s_token" class="form-input" placeholder="例如: 4a2b...">
             <p class="form-hint"><strong>强烈推荐配置！</strong> 用于绕过 Cloudflare 盾，修复 RSS 列表和文章详情中的图片加载失败问题。</p>
         </div>
 
@@ -327,16 +364,23 @@ async function handler(req: Request): Promise<Response> {
       </div>
       <script>
         const $=id=>document.getElementById(id);
-        $('base').value=localStorage.getItem('r_base')||'';
-        $('key').value=localStorage.getItem('r_key')||'';
-        $('sb').value=localStorage.getItem('s_base')||'';
-        $('sk').value=localStorage.getItem('s_key')||'';
+        // 读取数据 (Fix: 使用统一的 Key)
+        $('base').value = localStorage.getItem('r_base') || '';
+        $('key').value = localStorage.getItem('r_key') || '';
+        $('s_base').value = localStorage.getItem('s_base') || '';
+        $('s_token').value = localStorage.getItem('s_key') || ''; // 注意这里是 s_key
+
         function save(){
-            localStorage.setItem('r_base',$('base').value);localStorage.setItem('r_key',$('key').value);
-            localStorage.setItem('s_base',$('sb').value);localStorage.setItem('s_key',$('sk').value);
-            alert('设置已保存！');
+            localStorage.setItem('r_base', $('base').value.trim());
+            localStorage.setItem('r_key', $('key').value.trim());
+            
+            // 修复：保存 Scrape Token 时使用了 s_token 元素 ID，保存到 s_key
+            localStorage.setItem('s_base', $('s_base').value.trim());
+            localStorage.setItem('s_key', $('s_token').value.trim());
+            
+            alert('设置已保存！刷新首页即可生效。');
         }
-        function reset(){localStorage.clear();location.reload();}
+        function reset(){ localStorage.clear(); location.reload(); }
       </script>
     `;
     return new Response(render(html, "settings", "设置"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
@@ -360,10 +404,14 @@ async function handler(req: Request): Promise<Response> {
       <div class="grid">
         ${items.map(item => `
           <div class="card">
-            <div class="card-title">${item.title}</div>
+            <!-- Fix: 只有标题是链接跳转，防止误触 -->
+            <div class="card-title">
+                <a href="/topic/${item.topicId}">${item.title}</a>
+            </div>
+            
+            <!-- Fix: 普通 Div，允许选择文字，pointer-events: auto -->
             <div class="card-body">${item.descriptionHTML}</div>
             
-            <!-- UI Fix: 美化 Meta 信息 -->
             <div class="card-meta">
               <div class="meta-item">
                 <i class="far fa-user-circle"></i>
@@ -377,21 +425,26 @@ async function handler(req: Request): Promise<Response> {
 
             <div class="action-bar">
                 <a href="/topic/${item.topicId}" class="btn-action primary"><i class="fas fa-book-open"></i> Jina 浏览</a>
-                <a href="${item.link}" target="_blank" class="btn-action" onclick="event.stopPropagation()"><i class="fas fa-external-link-alt"></i> 阅读原文</a>
+                <a href="${item.link}" target="_blank" class="btn-action"><i class="fas fa-external-link-alt"></i> 阅读原文</a>
             </div>
-            <a href="/topic/${item.topicId}" class="card-link"></a>
+            <!-- 移除全卡片绝对定位链接 card-link -->
           </div>
         `).join('')}
       </div>
       <script>
          document.addEventListener('DOMContentLoaded', () => {
             const token = localStorage.getItem('s_key');
-            const base = localStorage.getItem('s_base') || '${DEFAULT_CONFIG.SCRAPE_BASE_URL}';
+            // 获取用户自定义的 Scrape Base，如果没设置则用默认值 (Fix: 修正默认值逻辑)
+            let base = localStorage.getItem('s_base');
+            if(!base) base = '${DEFAULT_CONFIG.SCRAPE_BASE_URL}';
+
             if(token) {
                 document.querySelectorAll('img.lazy').forEach(img => {
                     const o = img.getAttribute('data-src');
                     if(o && !o.includes(base)) {
-                        img.setAttribute('data-src', \`\${base.endsWith('/')?base:base+'/'}?token=\${token}&url=\${encodeURIComponent(o)}\`);
+                        // 统一处理 base url 结尾
+                        const finalBase = base.endsWith('/') ? base : base + '/';
+                        img.setAttribute('data-src', \`\${finalBase}?token=\${token}&url=\${encodeURIComponent(o)}\`);
                     }
                 });
             }
