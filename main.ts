@@ -73,7 +73,7 @@ function parseRSS(xml: string) {
 
 async function proxyRequest(url: string, headers: Record<string, string> = {}) {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/6.0", ...headers } });
+    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/7.0", ...headers } });
     if (!res.ok) throw new Error(`Request failed: ${res.status}`);
     return await res.text();
   } catch (e) {
@@ -96,25 +96,83 @@ const CSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
 
-/* Sidebar */
-.sidebar { width: var(--sidebar-width); background: #1e1e2e; color: #a6adc8; position: fixed; inset: 0 auto 0 0; z-index: 50; overflow-y: auto; transition: transform 0.3s; }
-.brand { padding: 1.5rem; color: #fff; font-weight: bold; font-size: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
-.nav a { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: inherit; text-decoration: none; }
-.nav a:hover, .nav a.active { background: rgba(255,255,255,0.1); color: #fff; }
-.nav a.active { border-left: 3px solid var(--primary); }
-.nav i { width: 24px; margin-right: 8px; }
+/* 侧边栏 (全平台默认隐藏) */
+.sidebar { 
+    width: var(--sidebar-width); 
+    background: #1e1e2e; 
+    color: #a6adc8; 
+    position: fixed; 
+    inset: 0 auto 0 0; 
+    z-index: 100; /* 最高层级 */
+    overflow-y: auto; 
+    transform: translateX(-100%); /* 默认隐藏 */
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: none;
+}
+.sidebar.open { 
+    transform: translateX(0); 
+    box-shadow: 0 0 50px rgba(0,0,0,0.5);
+}
 
-/* Main */
-.main { margin-left: var(--sidebar-width); flex: 1; width: 100%; transition: margin-left 0.3s; }
-.header { background: #fff; padding: 1rem 2rem; position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
+.brand { padding: 1.5rem; color: #fff; font-weight: bold; font-size: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 10px;}
+.nav a { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: inherit; text-decoration: none; transition: all 0.2s; }
+.nav a:hover, .nav a.active { background: rgba(255,255,255,0.1); color: #fff; }
+.nav a.active { border-left: 3px solid var(--primary); background: rgba(124, 58, 237, 0.1); }
+.nav i { width: 24px; margin-right: 8px; text-align: center;}
+
+/* 遮罩层 (全平台通用) */
+.overlay { 
+    position: fixed; 
+    inset: 0; 
+    background: rgba(0,0,0,0.5); 
+    z-index: 90; 
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+    backdrop-filter: blur(2px);
+}
+.overlay.show { opacity: 1; pointer-events: auto; }
+
+/* 主区域 (全平台全屏) */
+.main { 
+    flex: 1; 
+    width: 100%; 
+    margin-left: 0; /* 不再预留边距 */
+    min-width: 0; /* 防止 Flex 子项溢出 */
+}
+
+.header { 
+    background: #fff; 
+    padding: 0.8rem 1.5rem; 
+    position: sticky; 
+    top: 0; 
+    z-index: 40; 
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05); 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+}
+
+/* 菜单按钮 (始终显示) */
+.menu-btn { 
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
+    background: transparent; 
+    border: 1px solid #e5e7eb; 
+    font-size: 1rem; 
+    cursor: pointer; 
+    width: 40px; 
+    height: 40px; 
+    border-radius: 8px;
+    color: var(--text);
+    transition: all 0.2s;
+}
+.menu-btn:hover { background: #f3f4f6; }
+
 .content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
-.menu-btn { display: none; background: none; border: none; font-size: 1.2rem; cursor: pointer; }
 
 /* Grid & Card */
-/* 
-  改动：对于长内容，瀑布流布局（Masonry）在纯 CSS Grid 下比较难做完美的等高对齐。
-  如果内容非常长，卡片会变得很高。这是符合你"显示完整内容"需求的。
-*/
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; align-items: start; }
 
 .card { 
@@ -125,73 +183,43 @@ body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg);
     display: flex; 
     flex-direction: column; 
     position: relative; 
-    overflow: hidden; /* 保持圆角 */
     transition: transform 0.2s; 
 }
 .card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
 
 .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; line-height: 1.4; }
 
-/* --- 核心改动：.card-body 完全放开限制 --- */
+/* Card Body: 完全展示，无截断 */
 .card-body {
   font-size: 0.95rem;
   color: #4b5563;
   line-height: 1.6;
   margin-bottom: 1rem;
-  
-  /* 1. 移除 max-height，高度自适应 */
-  /* max-height: 260px;  <-- Removed */
-  
-  /* 2. 移除 overflow hidden，允许内容延伸 */
-  /* overflow: hidden;   <-- Removed */
-  
-  /* 3. 移除 mask-image 遮罩 */
-  /* -webkit-mask-image: ...; <-- Removed */
-  /* mask-image: ...;         <-- Removed */
 }
-
-/* 内部元素样式 */
 .card-body p { margin-bottom: 0.8rem; }
-
-/* 图片依然保持宽度自适应，防止撑破卡片宽度 */
-.card-body img { 
-  display: block; 
-  max-width: 100%; 
-  height: auto; 
-  border-radius: 6px; 
-  margin: 0.8rem 0; 
-}
-
-/* 依然隐藏不需要的统计信息和链接 */
-.card-body small, 
-.card-body a[href*="topic"] { display: none !important; }
+.card-body img { display: block; max-width: 100%; height: auto; border-radius: 6px; margin: 0.8rem 0; }
+.card-body small, .card-body a[href*="topic"] { display: none !important; }
 .card-body br { display: block; content: ""; margin-bottom: 0.5rem; }
-
-/* 禁止卡片内链接点击 */
 .card-body a { pointer-events: none; text-decoration: none; color: inherit; }
 
 .card-meta { margin-top: auto; padding-top: 1rem; border-top: 1px solid #e5e7eb; font-size: 0.85rem; color: var(--gray); display: flex; justify-content: space-between; }
 .card-link { position: absolute; inset: 0; z-index: 10; }
 
-/* Other */
-.reader { background: #fff; padding: 2rem; border-radius: 12px; min-height: 60vh; }
-.settings input { width: 100%; padding: 0.8rem; margin: 0.5rem 0 1.5rem; border: 1px solid #ddd; border-radius: 6px; }
-.btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.5rem; border-radius: 6px; cursor: pointer; }
+/* Reader & Forms */
+.reader { background: #fff; padding: 2rem; border-radius: 12px; min-height: 60vh; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.form-group { margin-bottom: 1.5rem; }
+.form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+.form-input { width: 100%; padding: 0.8rem; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; }
+.btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem; display: inline-flex; align-items: center; gap: 8px; }
+.btn:hover { opacity: 0.9; }
 
-/* Mobile */
+/* Mobile tweaks */
 @media (max-width: 768px) {
-  :root { --sidebar-width: 0px; }
-  .sidebar { transform: translateX(-100%); width: 260px; }
-  .sidebar.open { transform: translateX(0); box-shadow: 5px 0 15px rgba(0,0,0,0.3); }
-  .main { margin-left: 0; }
-  .menu-btn { display: block; }
-  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 45; display: none; }
-  .overlay.show { display: block; }
   .content { padding: 1rem; }
 }
 `;
 
-// --- 页面渲染 ---
+// --- 页面渲染模板 ---
 
 function render(bodyContent: string, activeId: string, title: string) {
   const navItems = CATEGORIES.map(c => 
@@ -209,23 +237,27 @@ function render(bodyContent: string, activeId: string, title: string) {
 </head>
 <body>
   <div class="overlay" onclick="toggle()"></div>
+  
   <nav class="sidebar" id="sb">
     <div class="brand"><i class="fab fa-linux"></i> Linux DO Reader</div>
     <div class="nav">
-      <a href="/" class="${activeId==='home'?'active':''}"><i class="fas fa-home"></i> 首页</a>
+      <a href="/" class="${activeId==='home'?'active':''}"><i class="fas fa-home"></i> 首页广场</a>
       ${navItems}
       <div style="margin:1rem 0; border-top:1px solid rgba(255,255,255,0.1)"></div>
-      <a href="/settings" class="${activeId==='settings'?'active':''}"><i class="fas fa-cog"></i> 设置</a>
+      <a href="/browser" class="${activeId==='browser'?'active':''}"><i class="fas fa-compass"></i> Jina 浏览器</a>
+      <a href="/settings" class="${activeId==='settings'?'active':''}"><i class="fas fa-cog"></i> 系统设置</a>
     </div>
   </nav>
+  
   <div class="main">
     <div class="header">
       <button class="menu-btn" onclick="toggle()"><i class="fas fa-bars"></i></button>
       <h3>${title}</h3>
-      <div></div>
+      <div style="width:40px"></div> <!-- 占位符保持标题居中 -->
     </div>
     <div class="content">${bodyContent}</div>
   </div>
+  
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/13.0.2/marked.min.js"></script>
   <script>
     function toggle() {
@@ -236,12 +268,56 @@ function render(bodyContent: string, activeId: string, title: string) {
 </body></html>`;
 }
 
+// --- 统一阅读器模板 (用于 RSS 详情和 Jina 浏览器) ---
+function renderReaderScript(apiUrlParamJS: string, backLink: string, backText: string) {
+    return `
+      <div class="reader">
+        <div style="margin-bottom:1rem"><a href="${backLink}" style="color:var(--primary);text-decoration:none;font-weight:500"><i class="fas fa-arrow-left"></i> ${backText}</a></div>
+        <div id="load" style="text-align:center;padding:4rem"><i class="fas fa-spinner fa-spin fa-3x" style="color:#ddd"></i><p style="margin-top:1rem;color:#888">正在渲染内容...</p></div>
+        <div id="err" style="display:none;color:#dc2626;padding:1rem;background:#fee2e2;border-radius:8px"></div>
+        <div id="view" style="display:none">
+          <h1 id="tt" style="margin-bottom:0.5rem;font-size:1.8rem"></h1>
+          <div id="meta" style="color:#888;margin-bottom:2rem;font-size:0.9rem;border-bottom:1px solid #eee;padding-bottom:1rem"></div>
+          <div id="md" class="markdown-body"></div>
+        </div>
+      </div>
+      <script>
+        (async () => {
+          const h = {};
+          const b = localStorage.getItem('r_base'), k = localStorage.getItem('r_key');
+          if(b) h['x-base'] = b; if(k) h['x-key'] = k;
+          try {
+            // 动态获取 URL
+            const urlParam = ${apiUrlParamJS};
+            const r = await fetch('/api/jina?url=' + encodeURIComponent(urlParam), {headers:h});
+            const d = await r.json();
+            if(d.error) throw new Error(d.error);
+            
+            document.getElementById('load').style.display='none';
+            document.getElementById('view').style.display='block';
+            document.getElementById('tt').innerText = d.title;
+            document.getElementById('meta').innerHTML = (d.date||'') + ' • <a href="'+d.url+'" target="_blank" style="color:inherit">阅读原文 <i class="fas fa-external-link-alt"></i></a>';
+            document.getElementById('md').innerHTML = marked.parse(d.markdown);
+            
+            // 图片懒加载优化
+            document.querySelectorAll('.markdown-body img').forEach(img => img.loading = 'lazy');
+          } catch(e) {
+            document.getElementById('load').style.display='none';
+            document.getElementById('err').style.display='block';
+            document.getElementById('err').innerHTML = '<strong>加载失败</strong><br>' + e.message + '<br><br><button onclick="location.reload()" class="btn">重试</button>';
+          }
+        })();
+      </script>
+    `;
+}
+
 // --- 主处理逻辑 ---
 
 async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
+  // API: Jina 代理
   if (path === "/api/jina") {
     const target = url.searchParams.get("url");
     if (!target) return new Response("Miss URL", { status: 400 });
@@ -267,9 +343,9 @@ async function handler(req: Request): Promise<Response> {
       const urlM = text.match(/URL Source: (.+)/);
 
       return new Response(JSON.stringify({
-        title: titleM ? titleM[1] : "详情",
+        title: titleM ? titleM[1] : "阅读模式",
         date: dateM ? dateM[1] : "",
-        url: urlM ? urlM[1] : "",
+        url: urlM ? urlM[1] : target,
         markdown: md
       }), { headers: { "Content-Type": "application/json" } });
     } catch (e: any) {
@@ -277,16 +353,62 @@ async function handler(req: Request): Promise<Response> {
     }
   }
 
+  // Page: Jina Browser (Input)
+  if (path === "/browser") {
+      const html = `
+        <div class="reader" style="text-align:center; padding-top:4rem;">
+            <i class="fas fa-compass" style="font-size:4rem; color:var(--primary); margin-bottom:2rem;"></i>
+            <h1 style="margin-bottom:1rem;">Jina 浏览器</h1>
+            <p style="color:#666; margin-bottom:2rem;">输入任意网址，将其转换为清爽的 Markdown 阅读模式</p>
+            
+            <div style="max-width:600px; margin:0 auto;">
+                <div class="form-group">
+                    <input type="url" id="target-url" class="form-input" placeholder="https://example.com/article..." required>
+                </div>
+                <button onclick="goBrowse()" class="btn" style="width:100%; justify-content:center; padding:1rem;">
+                    立即阅读 <i class="fas fa-arrow-right"></i>
+                </button>
+            </div>
+        </div>
+        <script>
+            function goBrowse() {
+                const u = document.getElementById('target-url').value.trim();
+                if(u) window.location.href = '/read?url=' + encodeURIComponent(u);
+                else alert('请输入网址');
+            }
+            // 回车支持
+            document.getElementById('target-url').addEventListener('keypress', function(e) {
+                if(e.key === 'Enter') goBrowse();
+            });
+        </script>
+      `;
+      return new Response(render(html, "browser", "Jina 浏览器"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+  }
+
+  // Page: Custom Reader (Jina Browser Result)
+  if (path === "/read") {
+      const targetUrl = url.searchParams.get("url") || "";
+      const html = renderReaderScript(`'${targetUrl}'`, '/browser', '返回浏览器');
+      return new Response(render(html, "browser", "阅读模式"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+  }
+
+  // Page: Settings
   if (path === "/settings") {
     const html = `
       <div class="reader settings">
-        <h2>设置</h2>
-        <label>Jina Base URL</label>
-        <input id="base" placeholder="${DEFAULT_CONFIG.JINA_BASE_URL}">
-        <label>API Key</label>
-        <input id="key" placeholder="Optional">
-        <button class="btn" onclick="save()">保存配置</button>
-        <button class="btn" onclick="reset()" style="background:#ccc;margin-left:1rem">重置</button>
+        <h2 style="margin-bottom:2rem"><i class="fas fa-sliders-h"></i> 个性化设置</h2>
+        <div class="form-group">
+            <label>Jina Base URL (反代地址)</label>
+            <input id="base" class="form-input" placeholder="${DEFAULT_CONFIG.JINA_BASE_URL}">
+        </div>
+        <div class="form-group">
+            <label>Jina API Key (可选)</label>
+            <input id="key" class="form-input" placeholder="Optional">
+        </div>
+        <div style="margin-top:2rem">
+            <button class="btn" onclick="save()"><i class="fas fa-save"></i> 保存配置</button>
+            <button class="btn" onclick="reset()" style="background:transparent; color:#666; border:1px solid #ddd; margin-left:1rem">恢复默认</button>
+        </div>
       </div>
       <script>
         const $ = id => document.getElementById(id);
@@ -296,7 +418,7 @@ async function handler(req: Request): Promise<Response> {
           const b = $('base').value.trim(), k = $('key').value.trim();
           b ? localStorage.setItem('r_base', b) : localStorage.removeItem('r_base');
           k ? localStorage.setItem('r_key', k) : localStorage.removeItem('r_key');
-          alert('已保存');
+          alert('设置已保存');
         }
         function reset() { localStorage.clear(); location.reload(); }
       </script>
@@ -304,44 +426,15 @@ async function handler(req: Request): Promise<Response> {
     return new Response(render(html, "settings", "设置"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   }
 
+  // Page: Topic Detail (RSS Item)
   if (path.startsWith("/topic/")) {
     const id = path.split("/")[2];
-    const html = `
-      <div class="reader">
-        <div style="margin-bottom:1rem"><a href="javascript:history.back()" style="color:var(--primary);text-decoration:none">&larr; 返回列表</a></div>
-        <div id="load" style="text-align:center;padding:3rem"><i class="fas fa-spinner fa-spin fa-2x"></i></div>
-        <div id="err" style="display:none;color:red;padding:1rem"></div>
-        <div id="view" style="display:none">
-          <h1 id="tt" style="margin-bottom:0.5rem"></h1>
-          <div id="meta" style="color:#888;margin-bottom:2rem;font-size:0.9rem"></div>
-          <div id="md" class="markdown-body"></div>
-        </div>
-      </div>
-      <script>
-        (async () => {
-          const h = {};
-          const b = localStorage.getItem('r_base'), k = localStorage.getItem('r_key');
-          if(b) h['x-base'] = b; if(k) h['x-key'] = k;
-          try {
-            const r = await fetch('/api/jina?url=' + encodeURIComponent('/t/topic/${id}'), {headers:h});
-            const d = await r.json();
-            if(d.error) throw new Error(d.error);
-            document.getElementById('load').style.display='none';
-            document.getElementById('view').style.display='block';
-            document.getElementById('tt').innerText = d.title;
-            document.getElementById('meta').innerHTML = (d.date||'') + ' <a href="'+d.url+'" target="_blank">[原文]</a>';
-            document.getElementById('md').innerHTML = marked.parse(d.markdown);
-          } catch(e) {
-            document.getElementById('load').style.display='none';
-            document.getElementById('err').style.display='block';
-            document.getElementById('err').innerText = '加载失败: ' + e.message;
-          }
-        })();
-      </script>
-    `;
-    return new Response(render(html, "topic", "详情"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+    // 复用统一的阅读器脚本，但是 URL 来源不同
+    const html = renderReaderScript(`'/t/topic/${id}'`, 'javascript:history.back()', '返回列表');
+    return new Response(render(html, "topic", "话题详情"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   }
 
+  // Page: List (RSS)
   let catId = "latest", title = "最新话题";
   if (path.startsWith("/category/")) {
     catId = path.split("/")[2];
@@ -373,7 +466,7 @@ async function handler(req: Request): Promise<Response> {
     `;
     return new Response(render(html, catId, title), { headers: { "Content-Type": "text/html; charset=utf-8" }});
   } catch (e: any) {
-    return new Response(render(`<div style="color:red">RSS Error: ${e.message}</div>`, catId, "Error"), { headers: { "Content-Type": "text/html" }});
+    return new Response(render(`<div style="color:#dc2626;padding:2rem;text-align:center">RSS 获取失败: ${e.message}</div>`, catId, "Error"), { headers: { "Content-Type": "text/html" }});
   }
 }
 
