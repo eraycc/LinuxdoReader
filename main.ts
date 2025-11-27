@@ -26,7 +26,6 @@ const CATEGORIES = [
 
 // --- 核心工具 ---
 
-// 生成代理 URL
 function proxifyImage(url: string, token: string, baseUrl: string): string {
   if (!token || !url) return url;
   const isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(url);
@@ -38,24 +37,14 @@ function proxifyImage(url: string, token: string, baseUrl: string): string {
   return url;
 }
 
-// HTML 懒加载处理: src -> data-src
 function processHtmlImagesLazy(html: string, token: string, baseUrl: string): string {
-  // 匹配 <img ... src="..." ...>
   return html.replace(/<img\s+([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi, (match, p1, src, p2) => {
     const realUrl = proxifyImage(src, token, baseUrl);
-    // 构造新的 img 标签：
-    // 1. src 使用透明像素或 loading 占位
-    // 2. 真实地址放入 data-src
-    // 3. 添加 class="lazy"
     return `<img ${p1} src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="${realUrl}" class="lazy" ${p2}>`;
   });
 }
 
-// Markdown 懒加载处理 (替换后 Markdown 渲染出的 img 标签需要被前端 JS 捕获，或者我们在这里直接把 markdown 的 img 语法替换成 HTML img 标签?)
-// 更好的做法：保持 Markdown 原样，但在前端 marked 渲染后，通过 JS 统一处理 src -> data-src。
-// 或者：在后端把 ![alt](url) 替换为 HTML <img class="lazy" data-src="url" ...>
 function processMarkdownImagesLazy(md: string, token: string, baseUrl: string): string {
-  // 替换 Markdown 图片语法为 HTML Lazy Image
   return md.replace(/!\[(.*?)\]\((.*?)\)/g, (match, alt, src) => {
     const [cleanSrc, title] = src.split(/\s+"'/);
     const realUrl = proxifyImage(cleanSrc, token, baseUrl);
@@ -88,9 +77,7 @@ function parseRSS(xml: string, scrapeToken: string, scrapeBase: string) {
     const link = extract("link").trim();
     const topicIdMatch = link.match(/\/topic\/(\d+)/);
     if (link && topicIdMatch) {
-      // 处理 HTML 图片为懒加载格式
       let desc = extract("description");
-      // 注意：即使没有 Token，我们也做懒加载处理 (data-src)，只是不走代理
       desc = processHtmlImagesLazy(desc, scrapeToken, scrapeBase);
 
       items.push({
@@ -108,65 +95,107 @@ function parseRSS(xml: string, scrapeToken: string, scrapeBase: string) {
 
 async function proxyRequest(url: string, headers: Record<string, string> = {}) {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/11.0", ...headers } });
+    const res = await fetch(url, { headers: { "User-Agent": "LinuxDOReader/12.0", ...headers } });
     if (!res.ok) throw new Error(`Status ${res.status}`);
     return await res.text();
   } catch (e) { console.error(e); throw e; }
 }
 
-// --- CSS ---
+// --- CSS 美化 ---
 const CSS = `
-:root { --sidebar-width: 260px; --primary: #7c3aed; --bg: #f3f4f6; --card-bg: #fff; --text: #374151; }
+:root { --sidebar-width: 260px; --primary: #7c3aed; --primary-light: #8b5cf6; --bg: #f3f4f6; --card-bg: #fff; --text: #1f2937; --text-light: #6b7280; }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
-.sidebar { width: var(--sidebar-width); background: #1e1e2e; color: #a6adc8; position: fixed; inset: 0 auto 0 0; z-index: 100; overflow-y: auto; transform: translateX(-100%); transition: transform 0.3s; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+
+/* Sidebar */
+.sidebar { width: var(--sidebar-width); background: #1e1e2e; color: #a6adc8; position: fixed; inset: 0 auto 0 0; z-index: 100; overflow-y: auto; transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 .sidebar.open { transform: translateX(0); box-shadow: 0 0 50px rgba(0,0,0,0.5); }
-.brand { padding: 1.5rem; color: #fff; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.1); }
-.nav a { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: inherit; text-decoration: none; }
-.nav a:hover, .nav a.active { background: rgba(255,255,255,0.1); color: #fff; }
-.nav a.active { border-left: 3px solid var(--primary); background: rgba(124, 58, 237, 0.1); }
-.nav i { width: 24px; margin-right: 8px; text-align: center; }
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+.brand { padding: 1.5rem; color: #fff; font-weight: bold; font-size: 1.1rem; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 10px; }
+.nav a { display: flex; align-items: center; padding: 0.8rem 1.5rem; color: inherit; text-decoration: none; transition: all 0.2s; }
+.nav a:hover { background: rgba(255,255,255,0.05); color: #fff; }
+.nav a.active { background: rgba(124, 58, 237, 0.15); color: #fff; border-left: 3px solid var(--primary); }
+.nav i { width: 24px; margin-right: 10px; text-align: center; opacity: 0.8; }
+
+/* Overlay & Main */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; backdrop-filter: blur(3px); }
 .overlay.show { opacity: 1; pointer-events: auto; }
 .main { flex: 1; width: 100%; margin-left: 0; min-width: 0; }
-.header { background: #fff; padding: 0.8rem 1.5rem; position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
-.menu-btn { width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; background: transparent; border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer; }
+.header { background: #fff; padding: 0.8rem 1.5rem; position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px rgba(0,0,0,0.03); display: flex; justify-content: space-between; align-items: center; }
+.menu-btn { width: 36px; height: 36px; display: flex; justify-content: center; align-items: center; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; color: var(--text); cursor: pointer; transition: all 0.2s; }
+.menu-btn:active { background: #f3f4f6; transform: scale(0.95); }
 .content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
+
+/* Grid & Card */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; align-items: start; }
-.card { background: var(--card-bg); border-radius: 12px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; position: relative; overflow: hidden; }
-.card-body { font-size: 0.95rem; color: #4b5563; line-height: 1.6; margin-bottom: 1rem; overflow-wrap: anywhere; word-break: break-word; }
-.card-body * { max-width: 100% !important; box-sizing: border-box; }
-
-/* --- Lazy Load Image Styles --- */
-.card-body img, .markdown-body img {
-    display: block;
-    height: auto; /* 保持比例 */
-    min-height: 50px; /* 避免高度塌陷 */
-    border-radius: 6px;
-    margin: 10px 0;
-    background: #f3f4f6; /* 占位背景色 */
-    transition: opacity 0.3s ease-in;
+.card { 
+    background: var(--card-bg); 
+    border-radius: 16px; 
+    padding: 1.5rem; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02), 0 1px 0 rgba(0,0,0,0.02);
+    border: 1px solid rgba(0,0,0,0.05);
+    display: flex; flex-direction: column; 
+    position: relative; transition: all 0.2s ease; 
+    overflow: hidden; 
 }
-img.lazy { opacity: 0.5; } /* 加载前透明度降低 */
-img.loaded { opacity: 1; }   /* 加载后完全显示 */
+.card:hover { transform: translateY(-4px); box-shadow: 0 12px 20px -5px rgba(0,0,0,0.1); border-color: rgba(124, 58, 237, 0.1); }
 
-.card-body pre { overflow-x: auto; background: #f8fafc; padding: 10px; border-radius: 6px; }
+.card-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.8rem; line-height: 1.4; color: #111827; }
+
+.card-body { font-size: 0.95rem; color: #4b5563; line-height: 1.6; margin-bottom: 1.2rem; overflow-wrap: anywhere; word-break: break-word; }
+.card-body * { max-width: 100% !important; box-sizing: border-box; }
+.card-body img { display: block; height: auto; border-radius: 8px; margin: 12px 0; background: #f3f4f6; transition: opacity 0.3s; }
+.card-body pre, .card-body table { display: block; width: 100%; overflow-x: auto; background: #f8fafc; border-radius: 8px; border: 1px solid #f1f5f9; margin: 10px 0; padding: 10px; }
 .card-body small, .card-body a[href*="topic"] { display: none !important; }
-.card-body a { pointer-events: none; color: inherit; text-decoration: none; }
-.action-bar { display: flex; gap: 10px; position: relative; z-index: 10; }
-.btn-action { flex: 1; padding: 0.7rem; border-radius: 8px; text-decoration: none; font-size: 0.9rem; text-align: center; border: 1px solid #e5e7eb; color: var(--text); }
-.btn-action.primary { background: #f3e8ff; color: var(--primary); border-color: transparent; }
+.card-body br { display: block; content: ""; margin-bottom: 6px; }
+.card-body a { pointer-events: none; color: var(--text); text-decoration: none; }
+img.lazy { opacity: 0.3; } img.loaded { opacity: 1; }
+
+/* Meta Styling (Fix) */
+.card-meta { 
+    margin-top: auto; 
+    padding-top: 1rem; 
+    border-top: 1px solid #f3f4f6; 
+    font-size: 0.85rem; 
+    color: var(--text-light); 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+    margin-bottom: 1rem; 
+}
+.meta-item { display: flex; align-items: center; gap: 6px; }
+.meta-item i { font-size: 0.8rem; opacity: 0.7; }
+.tag-pill { background: #f3f4f6; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 500; }
+
+/* Buttons */
+.action-bar { display: flex; gap: 12px; position: relative; z-index: 10; }
+.btn-action { 
+    flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; 
+    padding: 0.6rem; border-radius: 10px; text-decoration: none; font-size: 0.9rem; font-weight: 500;
+    cursor: pointer; transition: all 0.2s; border: 1px solid #e5e7eb; background: white; color: var(--text); 
+}
+.btn-action.primary { background: #f5f3ff; color: var(--primary); border-color: #ddd6fe; }
+.btn-action:hover { transform: translateY(-1px); filter: brightness(0.97); }
+
 .card-link { position: absolute; inset: 0; z-index: 1; }
-.reader { background: #fff; padding: 2rem; border-radius: 12px; }
-.form-input { width: 100%; padding: 0.8rem; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1rem; }
-.btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.5rem; border-radius: 8px; cursor: pointer; }
-@media (max-width: 768px) { .content { padding: 1rem; } }
+
+/* Reader & Settings */
+.reader { background: #fff; padding: 2.5rem; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+.form-group { margin-bottom: 2rem; }
+.form-label { display: block; margin-bottom: 0.6rem; font-weight: 600; font-size: 0.95rem; color: #374151; }
+.form-input { width: 100%; padding: 0.8rem 1rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; transition: border-color 0.2s; }
+.form-input:focus { border-color: var(--primary); outline: none; ring: 2px var(--primary-light); }
+.form-hint { font-size: 0.85rem; color: #6b7280; margin-top: 0.5rem; line-height: 1.4; }
+
+.btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.8rem; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 1rem; transition: background 0.2s; }
+.btn:hover { background: var(--primary-light); }
+.btn-outline { background: transparent; border: 1px solid #d1d5db; color: #4b5563; }
+.btn-outline:hover { background: #f9fafb; }
+
+@media (max-width: 768px) { .content { padding: 1rem; } .reader { padding: 1.5rem; } }
 `;
 
-// --- 通用懒加载脚本 ---
 const LAZY_LOAD_SCRIPT = `
 <script>
-// 通用懒加载观察器
 function initLazyLoad() {
     const observer = new IntersectionObserver((entries, self) => {
         entries.forEach(entry => {
@@ -182,31 +211,28 @@ function initLazyLoad() {
                 self.unobserve(img);
             }
         });
-    }, { rootMargin: "200px 0px" }); // 提前200px开始加载
-
+    }, { rootMargin: "300px 0px" });
     document.querySelectorAll('img.lazy').forEach(img => observer.observe(img));
 }
-
-// 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', initLazyLoad);
 </script>
 `;
 
 function render(body: string, activeId: string, title: string) {
   const nav = CATEGORIES.map(c => `<a href="/category/${c.id}" class="${activeId===c.id?'active':''}"><i style="font-style:normal">${c.icon}</i> ${c.name}</a>`).join('');
-  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} - Linux DO</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.6.1/github-markdown.min.css"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>${CSS}</style></head><body><div class="overlay" onclick="toggle()"></div><nav class="sidebar" id="sb"><div class="brand"><i class="fab fa-linux"></i> Linux DO Reader</div><div class="nav"><a href="/" class="${activeId==='home'?'active':''}"><i class="fas fa-home"></i> 首页广场</a>${nav}<div style="margin:1rem 0; border-top:1px solid rgba(255,255,255,0.1)"></div><a href="/browser" class="${activeId==='browser'?'active':''}"><i class="fas fa-compass"></i> Jina 浏览器</a><a href="/settings" class="${activeId==='settings'?'active':''}"><i class="fas fa-cog"></i> 系统设置</a></div></nav><div class="main"><div class="header"><button class="menu-btn" onclick="toggle()"><i class="fas fa-bars"></i></button><h3>${title}</h3><div style="width:40px"></div></div><div class="content">${body}</div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/marked/13.0.2/marked.min.js"></script><script>function toggle(){document.getElementById('sb').classList.toggle('open');document.querySelector('.overlay').classList.toggle('show')}</script>${LAZY_LOAD_SCRIPT}</body></html>`;
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} - Linux DO</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.6.1/github-markdown.min.css"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>${CSS}</style></head><body><div class="overlay" onclick="toggle()"></div><nav class="sidebar" id="sb"><div class="brand"><i class="fab fa-linux"></i> Linux DO Reader</div><div class="nav"><a href="/" class="${activeId==='home'?'active':''}"><i class="fas fa-home"></i> 首页广场</a>${nav}<div style="margin:1rem 0; border-top:1px solid rgba(255,255,255,0.1)"></div><a href="/browser" class="${activeId==='browser'?'active':''}"><i class="fas fa-compass"></i> Jina 浏览器</a><a href="/settings" class="${activeId==='settings'?'active':''}"><i class="fas fa-cog"></i> 系统设置</a></div></nav><div class="main"><div class="header"><button class="menu-btn" onclick="toggle()"><i class="fas fa-bars"></i></button><h3>${title}</h3><div style="width:36px"></div></div><div class="content">${body}</div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/marked/13.0.2/marked.min.js"></script><script>function toggle(){document.getElementById('sb').classList.toggle('open');document.querySelector('.overlay').classList.toggle('show')}</script>${LAZY_LOAD_SCRIPT}</body></html>`;
 }
 
 function renderReaderScript(urlJS: string, backLink: string, backText: string) {
     return `
       <div class="reader">
-        <div style="margin-bottom:1rem"><a href="${backLink}" style="color:var(--primary);text-decoration:none"><i class="fas fa-arrow-left"></i> ${backText}</a></div>
-        <div id="load" style="text-align:center;padding:4rem"><i class="fas fa-spinner fa-spin fa-3x" style="color:#ddd"></i></div>
-        <div id="err" style="display:none;color:#dc2626;padding:1rem;background:#fee2e2;border-radius:8px"></div>
+        <div style="margin-bottom:1.5rem"><a href="${backLink}" style="color:var(--primary);text-decoration:none;font-weight:500;display:inline-flex;align-items:center;gap:5px"><i class="fas fa-arrow-left"></i> ${backText}</a></div>
+        <div id="load" style="text-align:center;padding:5rem"><i class="fas fa-circle-notch fa-spin fa-3x" style="color:#e5e7eb"></i><p style="margin-top:1rem;color:#9ca3af">正在渲染内容...</p></div>
+        <div id="err" style="display:none;color:#b91c1c;padding:1.5rem;background:#fef2f2;border-radius:12px;border:1px solid #fecaca"></div>
         <div id="view" style="display:none">
-          <h1 id="tt" style="margin-bottom:0.5rem"></h1>
-          <div id="meta" style="color:#888;margin-bottom:2rem;border-bottom:1px solid #eee;padding-bottom:1rem"></div>
-          <div id="md" class="markdown-body"></div>
+          <h1 id="tt" style="margin-bottom:0.8rem;font-size:1.8rem;line-height:1.3;color:#111827"></h1>
+          <div id="meta" style="color:#6b7280;margin-bottom:2rem;border-bottom:1px solid #e5e7eb;padding-bottom:1.5rem;display:flex;gap:15px;font-size:0.9rem"></div>
+          <div id="md" class="markdown-body" style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif"></div>
         </div>
       </div>
       <script>
@@ -223,16 +249,13 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
             document.getElementById('load').style.display='none';
             document.getElementById('view').style.display='block';
             document.getElementById('tt').innerText = d.title;
-            document.getElementById('meta').innerHTML = (d.date||'') + ' • <a href="'+d.url+'" target="_blank">原文</a>';
-            // 渲染内容 (后端已经转换成了 <img class="lazy" data-src="..."> 格式)
+            document.getElementById('meta').innerHTML = '<span><i class="far fa-clock"></i> ' + (d.date||'未知时间') + '</span>' + ' <a href="'+d.url+'" target="_blank" style="color:inherit;text-decoration:none"><i class="fas fa-external-link-alt"></i> 查看原文</a>';
             document.getElementById('md').innerHTML = marked.parse(d.markdown);
-            
-            // 手动触发一次懒加载初始化，因为内容是异步插入的
             initLazyLoad();
           } catch(e) {
             document.getElementById('load').style.display='none';
             document.getElementById('err').style.display='block';
-            document.getElementById('err').innerText = 'Error: ' + e.message;
+            document.getElementById('err').innerHTML = '<strong>加载失败</strong><br>' + e.message;
           }
         })();
       </script>
@@ -245,7 +268,6 @@ async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
-  // API: Jina Proxy (Returns JSON with Markdown)
   if (path === "/api/jina") {
     const target = url.searchParams.get("url");
     if (!target) return new Response("Miss URL", { status: 400 });
@@ -262,29 +284,68 @@ async function handler(req: Request): Promise<Response> {
       let md = text;
       const idx = text.indexOf("Markdown Content:");
       if (idx > -1) md = text.substring(idx + 17).trim();
-      
-      // 后端预处理：将 Markdown 图片语法替换为 HTML 懒加载标签
-      // 注意：即使用户没配 Token，也替换为 Lazy 标签，只是 URL 不变
       md = processMarkdownImagesLazy(md, scrapeKey, scrapeBase);
-
       const t = text.match(/Title: (.+)/), d = text.match(/Published Time: (.+)/), u = text.match(/URL Source: (.+)/);
       return new Response(JSON.stringify({ title: t?t[1]:"Reader", date: d?d[1]:"", url: u?u[1]:target, markdown: md }), { headers: { "Content-Type": "application/json" } });
     } catch (e: any) { return new Response(JSON.stringify({ error: e.message }), { status: 500 }); }
   }
 
-  // ... (Settings, Browser, Read logic remains same, simplified here) ...
+  // Page: Settings (Fix: Added hints)
   if (path === "/settings") {
-      const html = `
-        <div class="reader settings"><h2>设置</h2><label>Jina Base</label><input id="base" class="form-input"><label>Jina Key</label><input id="key" class="form-input"><label>Scrape Base</label><input id="sb" class="form-input"><label>Scrape Token</label><input id="sk" class="form-input"><button onclick="save()" class="btn">保存</button></div>
-        <script>const $=id=>document.getElementById(id);$('base').value=localStorage.getItem('r_base')||'';$('key').value=localStorage.getItem('r_key')||'';$('sb').value=localStorage.getItem('s_base')||'';$('sk').value=localStorage.getItem('s_key')||'';function save(){localStorage.setItem('r_base',$('base').value);localStorage.setItem('r_key',$('key').value);localStorage.setItem('s_base',$('sb').value);localStorage.setItem('s_key',$('sk').value);alert('Saved')}</script>
-      `;
-      return new Response(render(html, "settings", "设置"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
-  }
-  if (path === "/browser") { return new Response(render(`<div class="reader" style="text-align:center;padding-top:4rem"><h1>Jina Browser</h1><input id="u" class="form-input" style="max-width:600px"><button onclick="go()" class="btn">Go</button></div><script>function go(){location.href='/read?url='+encodeURIComponent(document.getElementById('u').value)}</script>`, "browser", "Browser"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
-  if (path === "/read") { return new Response(render(renderReaderScript(`'${url.searchParams.get("url")}'`, '/browser', 'Back'), "browser", "Read"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
-  if (path.startsWith("/topic/")) { return new Response(render(renderReaderScript(`'/t/topic/${path.split("/")[2]}'`, 'javascript:history.back()', 'Back'), "topic", "Detail"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
+    const html = `
+      <div class="reader">
+        <h2 style="margin-bottom:2rem; font-size:1.5rem;"><i class="fas fa-sliders-h" style="color:var(--primary)"></i> 个性化设置</h2>
+        
+        <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin-bottom:1.5rem; font-size:1.1rem;">Jina AI (内容引擎)</h3>
+        <div class="form-group">
+            <label class="form-label">Jina Base URL</label>
+            <input id="base" class="form-input" placeholder="${DEFAULT_CONFIG.JINA_BASE_URL}">
+            <p class="form-hint">用于将网页转换为 Markdown 的服务地址。可以是官方 API 或自建代理。</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">API Key (可选)</label>
+            <input id="key" class="form-input" placeholder="例如: jina_xxx...">
+            <p class="form-hint">如果你有 Jina Pro 账号，填入 Key 可获得更高额度。留空使用免费额度。</p>
+        </div>
 
-  // RSS List
+        <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">Scrape.do (图片加速)</h3>
+        <div class="form-group">
+            <label class="form-label">Scrape Base URL</label>
+            <input id="sb" class="form-input" placeholder="${DEFAULT_CONFIG.SCRAPE_BASE_URL}">
+            <p class="form-hint">Scrape.do 的 API 接入点。</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Scrape Token</label>
+            <input id="sk" class="form-input" placeholder="例如: 4a2b...">
+            <p class="form-hint"><strong>强烈推荐配置！</strong> 用于绕过 Cloudflare 盾，修复 RSS 列表和文章详情中的图片加载失败问题。</p>
+        </div>
+
+        <div style="margin-top:3rem; display:flex; gap:15px;">
+            <button class="btn" onclick="save()"><i class="fas fa-save"></i> 保存配置</button>
+            <button class="btn btn-outline" onclick="reset()">恢复默认</button>
+        </div>
+      </div>
+      <script>
+        const $=id=>document.getElementById(id);
+        $('base').value=localStorage.getItem('r_base')||'';
+        $('key').value=localStorage.getItem('r_key')||'';
+        $('sb').value=localStorage.getItem('s_base')||'';
+        $('sk').value=localStorage.getItem('s_key')||'';
+        function save(){
+            localStorage.setItem('r_base',$('base').value);localStorage.setItem('r_key',$('key').value);
+            localStorage.setItem('s_base',$('sb').value);localStorage.setItem('s_key',$('sk').value);
+            alert('设置已保存！');
+        }
+        function reset(){localStorage.clear();location.reload();}
+      </script>
+    `;
+    return new Response(render(html, "settings", "设置"), { headers: { "Content-Type": "text/html; charset=utf-8" }});
+  }
+
+  if (path === "/browser") { return new Response(render(`<div class="reader" style="text-align:center;padding-top:4rem"><h1>Jina Browser</h1><input id="u" class="form-input" style="max-width:600px;margin-top:1rem" placeholder="输入网址..."><button onclick="go()" class="btn" style="margin-top:1rem">开始阅读</button></div><script>function go(){const u=document.getElementById('u').value;if(u)location.href='/read?url='+encodeURIComponent(u)}</script>`, "browser", "Browser"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
+  if (path === "/read") { return new Response(render(renderReaderScript(`'${url.searchParams.get("url")}'`, '/browser', '返回'), "browser", "Read"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
+  if (path.startsWith("/topic/")) { return new Response(render(renderReaderScript(`'/t/topic/${path.split("/")[2]}'`, 'javascript:history.back()', '返回列表'), "topic", "Detail"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
+
   let catId = "latest", title = "最新话题";
   if (path.startsWith("/category/")) { catId = path.split("/")[2]; const c = CATEGORIES.find(x => x.id === catId); if(c) title = c.name; }
 
@@ -293,8 +354,6 @@ async function handler(req: Request): Promise<Response> {
     const xml = await proxyRequest(`${DEFAULT_CONFIG.RSS_BASE_URL}/${file}`);
     const scrapeKey = req.headers.get("x-scrape-key") || DEFAULT_CONFIG.SCRAPE_TOKEN;
     const scrapeBase = req.headers.get("x-scrape-base") || DEFAULT_CONFIG.SCRAPE_BASE_URL;
-    
-    // 后端 SSR 生成懒加载 HTML
     const items = parseRSS(xml, scrapeKey, scrapeBase);
     
     const html = `
@@ -303,40 +362,46 @@ async function handler(req: Request): Promise<Response> {
           <div class="card">
             <div class="card-title">${item.title}</div>
             <div class="card-body">${item.descriptionHTML}</div>
-            <div class="card-meta"><span>${item.creator}</span><span>${new Date(item.pubDate).toLocaleDateString()}</span></div>
+            
+            <!-- UI Fix: 美化 Meta 信息 -->
+            <div class="card-meta">
+              <div class="meta-item">
+                <i class="far fa-user-circle"></i>
+                <span style="font-weight:500; color:#4b5563">${item.creator}</span>
+              </div>
+              <div class="meta-item">
+                <i class="far fa-clock"></i>
+                <span>${new Date(item.pubDate).toLocaleDateString('zh-CN', {month:'short', day:'numeric'})}</span>
+              </div>
+            </div>
+
             <div class="action-bar">
-                <a href="/topic/${item.topicId}" class="btn-action primary"><i class="fas fa-book-open"></i> Jina</a>
-                <a href="${item.link}" target="_blank" class="btn-action" onclick="event.stopPropagation()"><i class="fas fa-external-link-alt"></i> 原文</a>
+                <a href="/topic/${item.topicId}" class="btn-action primary"><i class="fas fa-book-open"></i> Jina 浏览</a>
+                <a href="${item.link}" target="_blank" class="btn-action" onclick="event.stopPropagation()"><i class="fas fa-external-link-alt"></i> 阅读原文</a>
             </div>
             <a href="/topic/${item.topicId}" class="card-link"></a>
           </div>
         `).join('')}
       </div>
       <script>
-         // 客户端增强：如果 LocalStorage 有 Token，进行二次替换并初始化 LazyLoad
          document.addEventListener('DOMContentLoaded', () => {
             const token = localStorage.getItem('s_key');
             const base = localStorage.getItem('s_base') || '${DEFAULT_CONFIG.SCRAPE_BASE_URL}';
             if(token) {
-                // 这里需要更新 data-src，因为 DOM 已经是 lazy 状态了
                 document.querySelectorAll('img.lazy').forEach(img => {
-                    const original = img.getAttribute('data-src');
-                    // 避免重复替换
-                    if(original && !original.includes(base)) {
-                        const finalBase = base.endsWith('/') ? base : base + '/';
-                        const newSrc = \`\${finalBase}?token=\${token}&url=\${encodeURIComponent(original)}\`;
-                        img.setAttribute('data-src', newSrc);
+                    const o = img.getAttribute('data-src');
+                    if(o && !o.includes(base)) {
+                        img.setAttribute('data-src', \`\${base.endsWith('/')?base:base+'/'}?token=\${token}&url=\${encodeURIComponent(o)}\`);
                     }
                 });
             }
-            // 重新初始化监听器，确保新的 data-src 被使用
             initLazyLoad();
          });
       </script>
     `;
     return new Response(render(html, catId, title), { headers: { "Content-Type": "text/html; charset=utf-8" }});
-  } catch (e: any) { return new Response(render(`<div style="color:red">Error: ${e.message}</div>`, catId, "Error"), { headers: { "Content-Type": "text/html" }}); }
+  } catch (e: any) { return new Response(render(`<div style="color:#dc2626">Error: ${e.message}</div>`, catId, "Error"), { headers: { "Content-Type": "text/html" }}); }
 }
 
-console.log("Service running on http://localhost:8000");
+console.log("http://localhost:8000");
 serve(handler, { port: 8000 });
