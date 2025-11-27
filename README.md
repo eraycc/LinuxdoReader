@@ -167,7 +167,8 @@ main.ts                 # 主应用文件
 
 ## 🙏 致谢
 
-- [Linux DO](https://linux.do) - 社区内容源
+- [Linux DO](https://linux.do) - LinuxDo社区
+- [Linux DO RSS](https://linuxdorss.longpink.com/) - LinuxDo第三方RSS源
 - [Jina.ai](https://jina.ai) - 内容解析服务  
 - [Deno](https://deno.com) - 运行时环境
 - [Marked](https://marked.js.org) - Markdown 解析
