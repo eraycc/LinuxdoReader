@@ -5,9 +5,10 @@ const DEFAULT_CONFIG = {
   RSS_BASE_URL: Deno.env.get("RSS_BASE_URL") || "https://linuxdorss.longpink.com",
   JINA_BASE_URL: Deno.env.get("JINA_BASE_URL") || "https://r.jina.ai",
   JINA_API_KEY: Deno.env.get("JINA_API_KEY") || "",
-  // 图片代理配置
-  IMAGE_PROXY_URL: Deno.env.get("IMAGE_PROXY_URL") || "", // 默认空值，不启用代理
-  IMAGE_PROXY_ENCODE: Deno.env.get("IMAGE_PROXY_ENCODE") === "true", // 默认关闭URL编码
+  // 图片代理模板，使用 ${image} 作为占位符，为空则不启用代理
+  IMAGE_PROXY_TEMPLATE: Deno.env.get("IMAGE_PROXY_TEMPLATE") || "",
+  // 是否对图片URL进行编码，默认关闭
+  IMAGE_URL_ENCODE: Deno.env.get("IMAGE_URL_ENCODE") === "true",
   // 缓存时间配置（单位：秒）
   RSS_CACHE_TTL: parseInt(Deno.env.get("RSS_CACHE_TTL") || "600"), // 默认 10 分钟
   JINA_CACHE_TTL: parseInt(Deno.env.get("JINA_CACHE_TTL") || "604800"), // 默认 7 天
@@ -105,35 +106,43 @@ async function fetchWithCache(
 // --- 核心工具 ---
 
 /**
- * 使用通用代理模板处理图片 URL
- * @param url 原始图片 URL
- * @param proxyUrl 代理模板，包含 ${image} 占位符
- * @param encodeUrl 是否对图片 URL 进行 URL 编码
+ * 使用模板代理图片URL
+ * @param url 原始图片URL
+ * @param template 代理模板，使用 ${image} 作为占位符
+ * @param urlEncode 是否对图片URL进行编码
  */
-function proxifyImage(url: string, proxyUrl: string, encodeUrl: boolean): string {
-  if (!proxyUrl || !url) return url;
+function proxifyImage(url: string, template: string, urlEncode: boolean): string {
+  // 如果没有模板或URL为空，直接返回原URL
+  if (!template || !url) return url;
   
-  // 如果代理模板不包含 ${image} 占位符，直接返回原 URL
-  if (!proxyUrl.includes("${image}")) return url;
-  
-  // 替换占位符，根据配置决定是否编码
-  const imageUrl = encodeUrl ? encodeURIComponent(url) : url;
-  return proxyUrl.replace("${image}", imageUrl);
+  // 检查模板是否包含占位符
+  if (!template.includes("${image}")) return url;
+
+  // 判断是否需要代理的图片
+  const isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(url);
+  const isLinuxDoUpload = url.includes("linux.do/uploads");
+
+  if (isImage || isLinuxDoUpload) {
+    // 根据设置决定是否编码
+    const imageUrl = urlEncode ? encodeURIComponent(url) : url;
+    return template.replace("${image}", imageUrl);
+  }
+  return url;
 }
 
-function processHtmlImagesLazy(html: string, proxyUrl: string, encodeUrl: boolean): string {
+function processHtmlImagesLazy(html: string, template: string, urlEncode: boolean): string {
   return html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi, (match, src) => {
-    const realUrl = proxifyImage(src, proxyUrl, encodeUrl);
+    const realUrl = proxifyImage(src, template, urlEncode);
     return match
       .replace(src, "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
       .replace("<img", `<img data-src="${realUrl}" class="lazy"`);
   });
 }
 
-function processMarkdownImagesLazy(md: string, proxyUrl: string, encodeUrl: boolean): string {
+function processMarkdownImagesLazy(md: string, template: string, urlEncode: boolean): string {
   return md.replace(/!\[(.*?)\]\((.*?)\)/g, (match, alt, src) => {
     const [cleanSrc, title] = src.split(/\s+"'/);
-    const realUrl = proxifyImage(cleanSrc, proxyUrl, encodeUrl);
+    const realUrl = proxifyImage(cleanSrc, template, urlEncode);
     const titleAttr = title ? ` title="${title}"` : "";
     return `<img alt="${alt}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="${realUrl}" class="lazy"${titleAttr}>`;
   });
@@ -185,7 +194,7 @@ interface RSSItem {
   creator: string;
 }
 
-function parseRSS(xml: string, proxyUrl: string, encodeUrl: boolean): RSSItem[] {
+function parseRSS(xml: string, proxyTemplate: string, urlEncode: boolean): RSSItem[] {
   const items: RSSItem[] = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
   let match;
@@ -209,7 +218,7 @@ function parseRSS(xml: string, proxyUrl: string, encodeUrl: boolean): RSSItem[] 
     const topicIdMatch = link.match(/\/topic\/(\d+)/);
     if (link && topicIdMatch) {
       let desc = extract("description");
-      desc = processHtmlImagesLazy(desc, proxyUrl, encodeUrl);
+      desc = processHtmlImagesLazy(desc, proxyTemplate, urlEncode);
 
       const pubDateStr = extract("pubDate");
       const pubDateTimestamp = new Date(pubDateStr).getTime() || 0;
@@ -355,36 +364,6 @@ img.lazy { opacity: 0.3; } img.loaded { opacity: 1; }
 .btn-action.primary { background: #f5f3ff; color: var(--primary); border-color: #ddd6fe; }
 .btn-action:hover { transform: translateY(-1px); filter: brightness(0.97); }
 
-/* 设置页面开关样式 */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 50px;
-  height: 24px;
-  vertical-align: middle;
-  margin-left: 10px;
-}
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #ccc;
-  transition: .4s;
-  border-radius: 24px;
-}
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 16px; width: 16px;
-  left: 4px; bottom: 4px;
-  background-color: white;
-  transition: .4s;
-  border-radius: 50%;
-}
-input:checked + .slider { background-color: var(--primary); }
-input:checked + .slider:before { transform: translateX(26px); }
-
 /* Reader & Settings */
 .reader { background: #fff; padding: 2.5rem; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
 .form-group { margin-bottom: 2rem; }
@@ -395,6 +374,14 @@ input:checked + .slider:before { transform: translateX(26px); }
 .btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.8rem; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 1rem; transition: background 0.2s; }
 .btn:hover { background: var(--primary-light); }
 .btn-outline { background: transparent; border: 1px solid #d1d5db; color: #4b5563; }
+
+/* Toggle Switch */
+.toggle-wrapper { display: flex; align-items: center; gap: 12px; }
+.toggle { position: relative; width: 50px; height: 26px; background: #e5e7eb; border-radius: 13px; cursor: pointer; transition: background 0.3s; }
+.toggle.active { background: var(--primary); }
+.toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; background: white; border-radius: 50%; transition: transform 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+.toggle.active::after { transform: translateX(24px); }
+.toggle-label { font-size: 0.95rem; color: #4b5563; }
 
 /* Cache Info */
 .cache-info { font-size: 0.75rem; color: #9ca3af; text-align: center; margin-top: 1rem; padding: 0.5rem; background: #f9fafb; border-radius: 6px; }
@@ -450,11 +437,11 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
         (async () => {
           const h = {};
           const b = localStorage.getItem('r_base'), k = localStorage.getItem('r_key');
-          const proxyUrl = localStorage.getItem('img_proxy_url');
-          const proxyEncode = localStorage.getItem('img_proxy_encode') === 'true';
+          const proxyTpl = localStorage.getItem('img_proxy_template');
+          const urlEncode = localStorage.getItem('img_url_encode') === 'true';
           if(b) h['x-base'] = b; if(k) h['x-key'] = k;
-          if(proxyUrl) h['x-img-proxy-url'] = proxyUrl;
-          if(proxyEncode) h['x-img-proxy-encode'] = 'true';
+          if(proxyTpl) h['x-img-proxy'] = proxyTpl;
+          if(urlEncode) h['x-img-encode'] = 'true';
           try {
             const r = await fetch('/api/jina?url=' + encodeURIComponent(${urlJS}), {headers:h});
             const d = await r.json();
@@ -489,8 +476,8 @@ async function handler(req: Request): Promise<Response> {
     const h: Record<string, string> = {};
     const key = req.headers.get("x-key") || DEFAULT_CONFIG.JINA_API_KEY;
     const base = req.headers.get("x-base") || DEFAULT_CONFIG.JINA_BASE_URL;
-    const proxyUrl = req.headers.get("x-img-proxy-url") || DEFAULT_CONFIG.IMAGE_PROXY_URL;
-    const proxyEncode = req.headers.get("x-img-proxy-encode") === "true" || DEFAULT_CONFIG.IMAGE_PROXY_ENCODE;
+    const proxyTemplate = req.headers.get("x-img-proxy") || DEFAULT_CONFIG.IMAGE_PROXY_TEMPLATE;
+    const urlEncode = req.headers.get("x-img-encode") === "true" || DEFAULT_CONFIG.IMAGE_URL_ENCODE;
     if (key) h["Authorization"] = `Bearer ${key}`;
 
     try {
@@ -513,7 +500,7 @@ async function handler(req: Request): Promise<Response> {
       let md = text;
       const idx = text.indexOf("Markdown Content:");
       if (idx > -1) md = text.substring(idx + 17).trim();
-      md = processMarkdownImagesLazy(md, proxyUrl, proxyEncode);
+      md = processMarkdownImagesLazy(md, proxyTemplate, urlEncode);
 
       const t = text.match(/Title: (.+)/),
         d = text.match(/Published Time: (.+)/),
@@ -551,26 +538,27 @@ async function handler(req: Request): Promise<Response> {
             <p class="form-hint">如果你有 Jina Pro 账号，填入 Key 可获得更高额度。留空使用免费额度。</p>
         </div>
 
-        <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">图片代理设置</h3>
+        <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">图片代理 (Image Proxy)</h3>
         <div class="form-group">
-            <label class="form-label">图片代理 URL</label>
-            <input id="img_proxy_url" class="form-input" placeholder="${DEFAULT_CONFIG.IMAGE_PROXY_URL || '留空则不启用代理'}">
+            <label class="form-label">图片代理模板</label>
+            <input id="img_proxy" class="form-input" placeholder="例如: https://proxy.example.com/?url=\${image}">
             <p class="form-hint">
-              <strong>支持通用模板！</strong> 使用 <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:0.85rem">\${image}</code> 作为图片链接占位符。<br>
-              示例：<br>
-              • <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:0.85rem">https://api.scrape.do/?token=xxx&url=\${image}</code><br>
-              • <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:0.85rem">https://domain.com/proxy/\${image}</code><br>
+              <strong>推荐配置！</strong> 用于绕过 Cloudflare 盾，修复图片加载失败问题。<br>
+              使用 <code>\${image}</code> 作为图片URL的占位符。<br>
+              示例1: <code>https://api.scrape.do/?token=xxx&url=\${image}</code><br>
+              示例2: <code>https://your-proxy.com/\${image}</code><br>
               留空则不启用图片代理。
             </p>
         </div>
-        <div class="form-group" style="display:flex;align-items:center;margin-top:1rem">
-            <label class="form-label" style="margin-bottom:0">对图片地址进行 URL 编码</label>
-            <label class="switch">
-              <input type="checkbox" id="img_proxy_encode">
-              <span class="slider"></span>
-            </label>
-            <p class="form-hint" style="margin-top:0.5rem;width:100%">
-              根据你的代理服务需求决定是否开启。例如 Scrape.do 需要编码，而简单路径拼接则不需要。
+        <div class="form-group">
+            <label class="form-label">URL 编码设置</label>
+            <div class="toggle-wrapper">
+                <div id="url_encode_toggle" class="toggle" onclick="toggleEncode()"></div>
+                <span class="toggle-label" id="encode_label">关闭 - 图片URL不进行编码</span>
+            </div>
+            <p class="form-hint">
+              某些代理服务（如 scrape.do）需要对图片URL进行编码。<br>
+              开启后，图片URL会使用 encodeURIComponent 进行编码。
             </p>
         </div>
 
@@ -590,16 +578,39 @@ async function handler(req: Request): Promise<Response> {
       </div>
       <script>
         const $=id=>document.getElementById(id);
+        
+        // 加载保存的设置
         $('base').value = localStorage.getItem('r_base') || '';
         $('key').value = localStorage.getItem('r_key') || '';
-        $('img_proxy_url').value = localStorage.getItem('img_proxy_url') || '';
-        $('img_proxy_encode').checked = localStorage.getItem('img_proxy_encode') === 'true';
+        $('img_proxy').value = localStorage.getItem('img_proxy_template') || '';
+        
+        // 初始化URL编码开关状态
+        const urlEncodeEnabled = localStorage.getItem('img_url_encode') === 'true';
+        updateEncodeToggle(urlEncodeEnabled);
+        
+        function updateEncodeToggle(enabled) {
+            const toggle = $('url_encode_toggle');
+            const label = $('encode_label');
+            if(enabled) {
+                toggle.classList.add('active');
+                label.textContent = '开启 - 图片URL将进行编码';
+            } else {
+                toggle.classList.remove('active');
+                label.textContent = '关闭 - 图片URL不进行编码';
+            }
+        }
+        
+        function toggleEncode() {
+            const toggle = $('url_encode_toggle');
+            const isActive = toggle.classList.contains('active');
+            updateEncodeToggle(!isActive);
+        }
 
         function save(){
             localStorage.setItem('r_base', $('base').value.trim());
             localStorage.setItem('r_key', $('key').value.trim());
-            localStorage.setItem('img_proxy_url', $('img_proxy_url').value.trim());
-            localStorage.setItem('img_proxy_encode', $('img_proxy_encode').checked);
+            localStorage.setItem('img_proxy_template', $('img_proxy').value.trim());
+            localStorage.setItem('img_url_encode', $('url_encode_toggle').classList.contains('active') ? 'true' : 'false');
             alert('设置已保存！刷新首页即可生效。');
         }
         function reset(){ localStorage.clear(); location.reload(); }
@@ -672,9 +683,9 @@ async function handler(req: Request): Promise<Response> {
       ? Math.round((Date.now() - parseInt(cachedTime)) / 1000)
       : 0;
 
-    const proxyUrl = DEFAULT_CONFIG.IMAGE_PROXY_URL;
-    const proxyEncode = DEFAULT_CONFIG.IMAGE_PROXY_ENCODE;
-    const items = parseRSS(xml, proxyUrl, proxyEncode);
+    const proxyTemplate = req.headers.get("x-img-proxy") || DEFAULT_CONFIG.IMAGE_PROXY_TEMPLATE;
+    const urlEncode = req.headers.get("x-img-encode") === "true" || DEFAULT_CONFIG.IMAGE_URL_ENCODE;
+    const items = parseRSS(xml, proxyTemplate, urlEncode);
 
     const html = `
       <div class="grid">
@@ -717,18 +728,22 @@ async function handler(req: Request): Promise<Response> {
       </div>
       <script>
          document.addEventListener('DOMContentLoaded', () => {
-            const proxyUrl = localStorage.getItem('img_proxy_url');
-            const proxyEncode = localStorage.getItem('img_proxy_encode') === 'true';
+            const proxyTpl = localStorage.getItem('img_proxy_template');
+            const urlEncode = localStorage.getItem('img_url_encode') === 'true';
 
-            if(proxyUrl) {
+            if(proxyTpl && proxyTpl.includes('\${image}')) {
                 document.querySelectorAll('img.lazy').forEach(img => {
-                    const o = img.getAttribute('data-src');
-                    if(o && !proxyUrl.includes('$\{image\}')) return; // 跳过不包含占位符的代理配置
-                    
-                    if(o && !o.includes(proxyUrl.split('$\{image\}')[0])) {
-                        // 只对尚未代理过的图片进行处理
-                        let finalUrl = proxyUrl.replace('$\{image\}', proxyEncode ? encodeURIComponent(o) : o);
-                        img.setAttribute('data-src', finalUrl);
+                    const originalSrc = img.getAttribute('data-src');
+                    if(originalSrc && !originalSrc.startsWith('data:')) {
+                        // 检查是否已经被代理过（避免重复代理）
+                        const isImage = /\\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(originalSrc);
+                        const isLinuxDoUpload = originalSrc.includes('linux.do/uploads');
+                        
+                        if(isImage || isLinuxDoUpload) {
+                            const imageUrl = urlEncode ? encodeURIComponent(originalSrc) : originalSrc;
+                            const proxiedUrl = proxyTpl.replace('\${image}', imageUrl);
+                            img.setAttribute('data-src', proxiedUrl);
+                        }
                     }
                 });
             }
