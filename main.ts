@@ -653,11 +653,11 @@ async function handler(req: Request): Promise<Response> {
             <div style="display:flex; gap:1rem; flex-wrap:wrap;">
                 <img id="test-img" class="lazy" 
                      src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-                     data-src="https://linux.do/uploads/default/original/3X/9/9/996a4d891573f7a8e199c9b4adaa4a91866e68d7.png"
+                     data-src="https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png"
                      style="max-width:200px; height:auto; border-radius:8px; border:1px solid #e5e7eb;">
                 <div>
                     <p style="font-size:0.85rem; color:#6b7280;">原始URL:</p>
-                    <code style="font-size:0.75rem; word-break:break-all;">https://linux.do/uploads/default/original/3X/9/9/996a4d891573f7a8e199c9b4adaa4a91866e68d7.png</code>
+                    <code style="font-size:0.75rem; word-break:break-all;">https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png</code>
                     <p style="font-size:0.85rem; color:#6b7280; margin-top:0.5rem;">代理后URL:</p>
                     <code id="proxied-url" style="font-size:0.75rem; word-break:break-all; color:var(--primary);"></code>
                 </div>
@@ -711,7 +711,7 @@ async function handler(req: Request): Promise<Response> {
         
         function testProxy() {
             const config = getProxyConfig();
-            const testUrl = 'https://linux.do/uploads/default/original/3X/9/9/996a4d891573f7a8e199c9b4adaa4a91866e68d7.png';
+            const testUrl = 'https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png';
             const proxiedUrl = applyProxy(testUrl, config);
             
             $('proxied-url').textContent = proxiedUrl;
