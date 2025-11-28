@@ -9,7 +9,7 @@ const DEFAULT_CONFIG = {
   IMAGE_URL_ENCODE: Deno.env.get("IMAGE_URL_ENCODE") === "true",
   RSS_CACHE_TTL: parseInt(Deno.env.get("RSS_CACHE_TTL") || "600"),
   JINA_CACHE_TTL: parseInt(Deno.env.get("JINA_CACHE_TTL") || "604800"),
-  PAGE_SIZE: parseInt(Deno.env.get("PAGE_SIZE") || "60"),
+  PAGE_SIZE: parseInt(Deno.env.get("PAGE_SIZE") || "50"),
 };
 
 const CATEGORIES = [
