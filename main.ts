@@ -277,23 +277,33 @@ const IMAGE_PROXY_SCRIPT = `
         };
     }
 
-    // 修复：更宽松的图片URL判断
-    function shouldProxy(url) {
+    // 检查代理模板是否有效
+    function isValidProxyTemplate(template) {
+        if (!template || typeof template !== 'string') return false;
+        template = template.trim();
+        if (!template) return false;
+        // 必须包含占位符
+        if (!template.includes('\${image}')) return false;
+        // 必须是有效的URL格式（以 http:// 或 https:// 开头）
+        if (!template.startsWith('http://') && !template.startsWith('https://')) return false;
+        return true;
+    }
+
+    // 判断URL是否是图片
+    function isImageUrl(url) {
         if (!url || url.startsWith('data:')) return false;
         
-        // 检查是否是 linux.do 的上传图片（最重要的判断）
+        // linux.do 上传图片
         if (url.includes('linux.do/uploads')) return true;
         
-        // 检查常见图片扩展名（支持带参数和尺寸后缀的情况）
-        // 例如: xxx.jpeg, xxx.png?v=1, xxx_2_450x1000.jpeg
+        // 常见图片扩展名
         if (/\\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|avif)/i.test(url)) return true;
         
-        // 检查常见图床域名
+        // 常见图床域名
         const imageHosts = [
             'imgur.com', 'i.imgur.com',
             'imgtu.com', 'i.imgtu.com',
             'sm.ms', 'i.sm.ms',
-            'cdnjs.cloudflare.com',
             'cdn.jsdelivr.net',
             'picsum.photos',
             'images.unsplash.com',
@@ -310,11 +320,16 @@ const IMAGE_PROXY_SCRIPT = `
         return false;
     }
 
+    // 综合判断：是否会使用代理
+    function willUseProxy(url, config) {
+        if (!isValidProxyTemplate(config.template)) return false;
+        if (!isImageUrl(url)) return false;
+        return true;
+    }
+
+    // 应用代理
     function applyProxy(url, config) {
-        if (!config.template || !config.template.includes('\${image}')) {
-            return url;
-        }
-        if (!shouldProxy(url)) {
+        if (!willUseProxy(url, config)) {
             return url;
         }
         const imageUrl = config.urlEncode ? encodeURIComponent(url) : url;
@@ -344,8 +359,7 @@ const IMAGE_PROXY_SCRIPT = `
                     if (originalSrc && !originalSrc.startsWith('data:')) {
                         const finalSrc = applyProxy(originalSrc, config);
                         
-                        // Debug log
-                        if (config.template) {
+                        if (config.template && willUseProxy(originalSrc, config)) {
                             console.log('[Image Proxy]', originalSrc, '->', finalSrc);
                         }
                         
@@ -385,7 +399,9 @@ const IMAGE_PROXY_SCRIPT = `
     window.initLazyLoad = initLazyLoad;
     window.getProxyConfig = getProxyConfig;
     window.applyProxy = applyProxy;
-    window.shouldProxy = shouldProxy;
+    window.isImageUrl = isImageUrl;
+    window.isValidProxyTemplate = isValidProxyTemplate;
+    window.willUseProxy = willUseProxy;
     window.bindImageClick = bindImageClick;
 
     if (document.readyState === 'loading') {
@@ -531,7 +547,7 @@ async function handler(req: Request): Promise<Response> {
             <p class="form-hint">
               使用 <code>\${image}</code> 作为图片URL的占位符。<br>
               <strong>示例:</strong> <code>https://images.weserv.nl/?url=\${image}</code><br>
-              留空则不启用代理。
+              留空则不启用代理。必须以 http:// 或 https:// 开头，且包含 \${image} 占位符。
             </p>
         </div>
         <div class="form-group">
@@ -565,12 +581,14 @@ async function handler(req: Request): Promise<Response> {
                      data-original="https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png"
                      style="max-width:150px; height:auto; border-radius:8px; border:1px solid #e5e7eb;">
                 <div style="flex:1; min-width:200px; font-size:0.8rem;">
-                    <p style="color:#6b7280; margin-bottom:0.3rem;">原始:</p>
+                    <p style="color:#6b7280; margin-bottom:0.3rem;">原始URL:</p>
                     <code style="word-break:break-all; display:block; padding:0.3rem; background:#f3f4f6; border-radius:4px; font-size:0.7rem;">https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png</code>
-                    <p style="color:#6b7280; margin:0.5rem 0 0.3rem;">代理后:</p>
+                    <p style="color:#6b7280; margin:0.5rem 0 0.3rem;">代理后URL:</p>
                     <code id="proxied-url" style="word-break:break-all; color:var(--primary); display:block; padding:0.3rem; background:#f5f3ff; border-radius:4px; font-size:0.7rem;"></code>
-                    <p style="color:#6b7280; margin:0.5rem 0 0.3rem;">shouldProxy 结果:</p>
-                    <code id="should-proxy-result" style="display:block; padding:0.3rem; background:#f3f4f6; border-radius:4px; font-size:0.7rem;"></code>
+                    <p style="color:#6b7280; margin:0.5rem 0 0.3rem;">代理模板有效:</p>
+                    <code id="template-valid" style="display:block; padding:0.3rem; background:#f3f4f6; border-radius:4px; font-size:0.7rem;"></code>
+                    <p style="color:#6b7280; margin:0.5rem 0 0.3rem;">是否使用代理:</p>
+                    <code id="will-use-proxy" style="display:block; padding:0.3rem; background:#f3f4f6; border-radius:4px; font-size:0.7rem;"></code>
                 </div>
             </div>
             <button class="btn btn-outline" style="margin-top:1rem;" onclick="testProxy()"><i class="fas fa-sync"></i> 测试</button>
@@ -618,13 +636,21 @@ async function handler(req: Request): Promise<Response> {
             const config = getProxyConfig();
             const testUrl = 'https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png';
             
-            const shouldProxyResult = shouldProxy(testUrl);
-            $('should-proxy-result').textContent = shouldProxyResult ? 'true (会代理)' : 'false (不代理)';
-            $('should-proxy-result').style.color = shouldProxyResult ? '#10b981' : '#ef4444';
+            // 检查代理模板是否有效
+            const templateValid = isValidProxyTemplate(config.template);
+            $('template-valid').textContent = templateValid ? 'true (有效)' : 'false (无效或未设置)';
+            $('template-valid').style.color = templateValid ? '#10b981' : '#ef4444';
             
+            // 检查是否会使用代理
+            const useProxy = willUseProxy(testUrl, config);
+            $('will-use-proxy').textContent = useProxy ? 'true (会代理)' : 'false (不代理)';
+            $('will-use-proxy').style.color = useProxy ? '#10b981' : '#ef4444';
+            
+            // 显示代理后的URL
             const proxiedUrl = applyProxy(testUrl, config);
-            $('proxied-url').textContent = proxiedUrl || '(未配置代理)';
+            $('proxied-url').textContent = useProxy ? proxiedUrl : '(不使用代理，直接加载原图)';
             
+            // 重新加载测试图片
             const testImg = $('test-img');
             testImg.classList.remove('loaded');
             testImg.classList.add('lazy');
