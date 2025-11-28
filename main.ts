@@ -5,13 +5,10 @@ const DEFAULT_CONFIG = {
   RSS_BASE_URL: Deno.env.get("RSS_BASE_URL") || "https://linuxdorss.longpink.com",
   JINA_BASE_URL: Deno.env.get("JINA_BASE_URL") || "https://r.jina.ai",
   JINA_API_KEY: Deno.env.get("JINA_API_KEY") || "",
-  // 图片代理URL模板，使用 ${image} 作为占位符，为空则不启用代理
   IMAGE_PROXY_URL: Deno.env.get("IMAGE_PROXY_URL") || "",
-  // 是否对图片URL进行编码，默认关闭
   IMAGE_URL_ENCODE: Deno.env.get("IMAGE_URL_ENCODE") === "true",
-  // 缓存时间配置（单位：秒）
-  RSS_CACHE_TTL: parseInt(Deno.env.get("RSS_CACHE_TTL") || "600"), // 默认 10 分钟
-  JINA_CACHE_TTL: parseInt(Deno.env.get("JINA_CACHE_TTL") || "604800"), // 默认 7 天
+  RSS_CACHE_TTL: parseInt(Deno.env.get("RSS_CACHE_TTL") || "600"),
+  JINA_CACHE_TTL: parseInt(Deno.env.get("JINA_CACHE_TTL") || "604800"),
 };
 
 const CATEGORIES = [
@@ -96,13 +93,8 @@ async function fetchWithCache(
 
 // --- 核心工具 ---
 
-/**
- * 处理 HTML 中的图片为懒加载格式
- * 保留原始 src 到 data-src，设置占位图
- */
 function processHtmlImagesLazy(html: string): string {
   return html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi, (match, src) => {
-    // 跳过已经是 data URI 的图片
     if (src.startsWith('data:')) return match;
     return match
       .replace(src, "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
@@ -221,117 +213,44 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
 .content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
 
 /* Grid & Card */
-.grid {
-  columns: 320px auto;
-  column-gap: 1.5rem;
-}
-.card {
-  background: var(--card-bg);
-  border-radius: 16px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02), 0 1px 0 rgba(0,0,0,0.02);
-  border: 1px solid rgba(0,0,0,0.05);
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  transition: all 0.2s ease;
-  overflow: hidden;
-  break-inside: avoid;
-  margin-bottom: 1.5rem;
-}
+.grid { columns: 320px auto; column-gap: 1.5rem; }
+.card { background: var(--card-bg); border-radius: 16px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.02), 0 1px 0 rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); display: flex; flex-direction: column; position: relative; transition: all 0.2s ease; overflow: hidden; break-inside: avoid; margin-bottom: 1.5rem; }
 .card:hover { transform: translateY(-4px); box-shadow: 0 12px 20px -5px rgba(0,0,0,0.1); border-color: rgba(124, 58, 237, 0.1); }
 
-.card-title { 
-    font-size: 1.15rem; 
-    font-weight: 700; 
-    margin-bottom: 0.8rem; 
-    line-height: 1.4; 
-    color: #111827; 
-}
-.card-title a {
-    color: inherit;
-    text-decoration: none;
-    display: block;
-}
+.card-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.8rem; line-height: 1.4; color: #111827; }
+.card-title a { color: inherit; text-decoration: none; display: block; }
 .card-title a:hover { color: var(--primary); }
 
-.card-body { 
-    font-size: 0.95rem; 
-    color: #4b5563; 
-    line-height: 1.6; 
-    margin-bottom: 1.2rem; 
-    overflow-wrap: anywhere; 
-    word-break: break-word;
-    user-select: text; 
-    -webkit-user-select: text;
-    cursor: text;
-}
+.card-body { font-size: 0.95rem; color: #4b5563; line-height: 1.6; margin-bottom: 1.2rem; overflow-wrap: anywhere; word-break: break-word; user-select: text; -webkit-user-select: text; cursor: text; }
 .card-body * { max-width: 100% !important; box-sizing: border-box; }
-.card-body img { 
-    display: block; 
-    height: auto; 
-    border-radius: 8px; 
-    margin: 12px 0; 
-    background: #f3f4f6; 
-    transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out; 
-    pointer-events: auto;
-    cursor: pointer;
-    min-height: 50px;
-}
+.card-body img { display: block; height: auto; border-radius: 8px; margin: 12px 0; background: #f3f4f6; transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out; pointer-events: auto; cursor: pointer; min-height: 50px; }
 .card-body pre, .card-body table { display: block; width: 100%; overflow-x: auto; background: #f8fafc; border-radius: 8px; border: 1px solid #f1f5f9; margin: 10px 0; padding: 10px; }
 .card-body small, .card-body a[href*="topic"] { display: none !important; }
 .card-body br { display: block; content: ""; margin-bottom: 6px; }
 .card-body a { pointer-events: auto; color: var(--text); text-decoration: none; cursor: text; }
 
-/* 懒加载图片样式 */
-img.lazy { 
-    opacity: 0.5; 
-    filter: blur(5px);
-}
-img.lazy.loading {
-    opacity: 0.7;
-}
-img.lazy.loaded, img.loaded { 
-    opacity: 1; 
-    filter: blur(0);
-}
+img.lazy { opacity: 0.5; filter: blur(5px); }
+img.lazy.loading { opacity: 0.7; }
+img.lazy.loaded, img.loaded { opacity: 1; filter: blur(0); }
 
-/* Meta Styling */
-.card-meta { 
-    margin-top: auto; 
-    padding-top: 1rem; 
-    border-top: 1px solid #f3f4f6; 
-    font-size: 0.85rem; 
-    color: var(--text-light); 
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center;
-    margin-bottom: 1rem; 
-}
+.card-meta { margin-top: auto; padding-top: 1rem; border-top: 1px solid #f3f4f6; font-size: 0.85rem; color: var(--text-light); display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .meta-item { display: flex; align-items: center; gap: 6px; }
 
-/* Buttons */
 .action-bar { display: flex; gap: 12px; position: relative; z-index: 10; }
-.btn-action { 
-    flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; 
-    padding: 0.6rem; border-radius: 10px; text-decoration: none; font-size: 0.9rem; font-weight: 500;
-    cursor: pointer; transition: all 0.2s; border: 1px solid #e5e7eb; background: white; color: var(--text); 
-}
+.btn-action { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0.6rem; border-radius: 10px; text-decoration: none; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: all 0.2s; border: 1px solid #e5e7eb; background: white; color: var(--text); }
 .btn-action.primary { background: #f5f3ff; color: var(--primary); border-color: #ddd6fe; }
 .btn-action:hover { transform: translateY(-1px); filter: brightness(0.97); }
 
-/* Reader & Settings */
 .reader { background: #fff; padding: 2.5rem; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
 .form-group { margin-bottom: 2rem; }
 .form-label { display: block; margin-bottom: 0.6rem; font-weight: 600; font-size: 0.95rem; color: #374151; }
 .form-input { width: 100%; padding: 0.8rem 1rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; transition: border-color 0.2s; }
-.form-input:focus { border-color: var(--primary); outline: none; ring: 2px var(--primary-light); }
+.form-input:focus { border-color: var(--primary); outline: none; }
 .form-hint { font-size: 0.85rem; color: #6b7280; margin-top: 0.5rem; line-height: 1.4; }
 .btn { background: var(--primary); color: #fff; border: none; padding: 0.8rem 1.8rem; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 1rem; transition: background 0.2s; }
 .btn:hover { background: var(--primary-light); }
 .btn-outline { background: transparent; border: 1px solid #d1d5db; color: #4b5563; }
 
-/* Toggle Switch */
 .toggle-wrapper { display: flex; align-items: center; gap: 12px; }
 .toggle { position: relative; width: 50px; height: 26px; background: #e5e7eb; border-radius: 13px; cursor: pointer; transition: background 0.3s; }
 .toggle.active { background: var(--primary); }
@@ -339,36 +258,18 @@ img.lazy.loaded, img.loaded {
 .toggle.active::after { transform: translateX(24px); }
 .toggle-label { font-size: 0.95rem; color: #4b5563; }
 
-/* Cache Info */
 .cache-info { font-size: 0.75rem; color: #9ca3af; text-align: center; margin-top: 1rem; padding: 0.5rem; background: #f9fafb; border-radius: 6px; }
 
-/* Markdown Body Images */
-.markdown-body img {
-    transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out;
-    min-height: 50px;
-    background: #f3f4f6;
-    border-radius: 8px;
-    cursor: pointer;
-}
-.markdown-body img.lazy {
-    opacity: 0.5;
-    filter: blur(5px);
-}
-.markdown-body img.loaded {
-    opacity: 1;
-    filter: blur(0);
-}
+.markdown-body img { transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out; min-height: 50px; background: #f3f4f6; border-radius: 8px; cursor: pointer; }
+.markdown-body img.lazy { opacity: 0.5; filter: blur(5px); }
+.markdown-body img.loaded { opacity: 1; filter: blur(0); }
 
 @media (max-width: 768px) { .content { padding: 1rem; } .reader { padding: 1.5rem; } }
 `;
 
-/**
- * 图片代理和懒加载的前端脚本
- */
 const IMAGE_PROXY_SCRIPT = `
 <script>
 (function() {
-    // 获取图片代理配置
     function getProxyConfig() {
         return {
             template: localStorage.getItem('img_proxy_url') || '',
@@ -376,15 +277,39 @@ const IMAGE_PROXY_SCRIPT = `
         };
     }
 
-    // 判断是否需要代理的图片
+    // 修复：更宽松的图片URL判断
     function shouldProxy(url) {
         if (!url || url.startsWith('data:')) return false;
-        const isImage = /\\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\\?.*)?$/i.test(url);
-        const isLinuxDoUpload = url.includes('linux.do/uploads');
-        return isImage || isLinuxDoUpload;
+        
+        // 检查是否是 linux.do 的上传图片（最重要的判断）
+        if (url.includes('linux.do/uploads')) return true;
+        
+        // 检查常见图片扩展名（支持带参数和尺寸后缀的情况）
+        // 例如: xxx.jpeg, xxx.png?v=1, xxx_2_450x1000.jpeg
+        if (/\\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|avif)/i.test(url)) return true;
+        
+        // 检查常见图床域名
+        const imageHosts = [
+            'imgur.com', 'i.imgur.com',
+            'imgtu.com', 'i.imgtu.com',
+            'sm.ms', 'i.sm.ms',
+            'cdnjs.cloudflare.com',
+            'cdn.jsdelivr.net',
+            'picsum.photos',
+            'images.unsplash.com',
+            'i.loli.net',
+            'cdn.nlark.com',
+            'img.shields.io'
+        ];
+        
+        try {
+            const urlObj = new URL(url);
+            if (imageHosts.some(host => urlObj.hostname.includes(host))) return true;
+        } catch {}
+        
+        return false;
     }
 
-    // 应用代理到图片URL
     function applyProxy(url, config) {
         if (!config.template || !config.template.includes('\${image}')) {
             return url;
@@ -396,22 +321,17 @@ const IMAGE_PROXY_SCRIPT = `
         return config.template.replace('\${image}', imageUrl);
     }
 
-    // 绑定图片点击事件
     function bindImageClick(img, finalSrc) {
-        // 移除旧的点击事件
         img.onclick = null;
-        // 设置新的点击事件，打开代理后的图片
         img.style.cursor = 'pointer';
         img.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
             window.open(finalSrc, '_blank');
         };
-        // 保存最终URL到data属性
         img.setAttribute('data-final-src', finalSrc);
     }
 
-    // 初始化懒加载
     function initLazyLoad() {
         const config = getProxyConfig();
         
@@ -422,31 +342,28 @@ const IMAGE_PROXY_SCRIPT = `
                     let originalSrc = img.getAttribute('data-src') || img.getAttribute('data-original');
                     
                     if (originalSrc && !originalSrc.startsWith('data:')) {
-                        // 应用代理
                         const finalSrc = applyProxy(originalSrc, config);
+                        
+                        // Debug log
+                        if (config.template) {
+                            console.log('[Image Proxy]', originalSrc, '->', finalSrc);
+                        }
                         
                         img.classList.add('loading');
                         
-                        // 创建新图片预加载
                         const tempImg = new Image();
                         tempImg.onload = function() {
                             img.src = finalSrc;
                             img.classList.remove('lazy', 'loading');
                             img.classList.add('loaded');
-                            // 绑定点击事件，跳转到代理后的URL
                             bindImageClick(img, finalSrc);
                         };
                         tempImg.onerror = function() {
-                            // 如果代理失败，尝试原始URL
-                            if (finalSrc !== originalSrc) {
-                                img.src = originalSrc;
-                                bindImageClick(img, originalSrc);
-                            } else {
-                                img.src = originalSrc;
-                                bindImageClick(img, originalSrc);
-                            }
+                            console.warn('[Image Proxy] Failed:', finalSrc, 'Fallback to:', originalSrc);
+                            img.src = originalSrc;
                             img.classList.remove('lazy', 'loading');
                             img.classList.add('loaded');
+                            bindImageClick(img, originalSrc);
                         };
                         tempImg.src = finalSrc;
                         
@@ -465,34 +382,12 @@ const IMAGE_PROXY_SCRIPT = `
         });
     }
 
-    // 处理已加载的图片（用于动态添加的内容）
-    function processLoadedImages(container) {
-        const config = getProxyConfig();
-        const imgs = container ? container.querySelectorAll('img') : document.querySelectorAll('img');
-        
-        imgs.forEach(img => {
-            // 跳过已处理的图片
-            if (img.hasAttribute('data-final-src')) return;
-            
-            const src = img.src;
-            if (src && !src.startsWith('data:') && shouldProxy(src)) {
-                const finalSrc = applyProxy(src, config);
-                if (finalSrc !== src) {
-                    img.src = finalSrc;
-                }
-                bindImageClick(img, finalSrc);
-            }
-        });
-    }
-
-    // 导出到全局
     window.initLazyLoad = initLazyLoad;
     window.getProxyConfig = getProxyConfig;
     window.applyProxy = applyProxy;
-    window.processLoadedImages = processLoadedImages;
+    window.shouldProxy = shouldProxy;
     window.bindImageClick = bindImageClick;
 
-    // DOM 加载完成后初始化
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initLazyLoad);
     } else {
@@ -538,10 +433,8 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
             document.getElementById('tt').innerText = d.title;
             document.getElementById('meta').innerHTML = '<span><i class="far fa-clock"></i> ' + (d.date||'未知时间') + '</span>' + ' <a href="'+d.url+'" target="_blank" style="color:inherit;text-decoration:none"><i class="fas fa-external-link-alt"></i> 查看原文</a>' + (d.cached ? ' <span style="color:#10b981"><i class="fas fa-bolt"></i> 已缓存</span>' : '');
             
-            // 解析 Markdown
             let html = marked.parse(d.markdown);
             
-            // 将普通 img 转换为懒加载格式，同时保存原始URL
             html = html.replace(/<img\\s+([^>]*)src=["']([^"']+)["']([^>]*)>/gi, function(match, before, src, after) {
                 if (src.startsWith('data:')) return match;
                 return '<img ' + before + 'src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="' + src + '" data-original="' + src + '" class="lazy"' + after + '>';
@@ -549,7 +442,6 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
             
             document.getElementById('md').innerHTML = html;
             
-            // 重新初始化懒加载
             if (typeof initLazyLoad === 'function') {
                 initLazyLoad();
             }
@@ -563,13 +455,10 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
     `;
 }
 
-// --- Handler ---
-
 async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
-  // Jina API 请求（带缓存）
   if (path === "/api/jina") {
     const target = url.searchParams.get("url");
     if (!target) return new Response("Miss URL", { status: 400 });
@@ -627,12 +516,12 @@ async function handler(req: Request): Promise<Response> {
         <div class="form-group">
             <label class="form-label">Jina Base URL</label>
             <input id="base" class="form-input" placeholder="${DEFAULT_CONFIG.JINA_BASE_URL}">
-            <p class="form-hint">用于将网页转换为 Markdown 的服务地址。可以是官方 API 或自建代理。</p>
+            <p class="form-hint">用于将网页转换为 Markdown 的服务地址。</p>
         </div>
         <div class="form-group">
             <label class="form-label">API Key (可选)</label>
             <input id="key" class="form-input" placeholder="例如: jina_xxx...">
-            <p class="form-hint">如果你有 Jina Pro 账号，填入 Key 可获得更高额度。留空使用免费额度。</p>
+            <p class="form-hint">Jina Pro 账号的 API Key。</p>
         </div>
 
         <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">图片代理 (Image Proxy)</h3>
@@ -640,70 +529,60 @@ async function handler(req: Request): Promise<Response> {
             <label class="form-label">图片代理URL模板</label>
             <input id="img_proxy" class="form-input" placeholder="例如: https://proxy.example.com/?url=\${image}">
             <p class="form-hint">
-              <strong>推荐配置！</strong> 用于绕过 Cloudflare 盾，修复图片加载失败问题。<br>
               使用 <code>\${image}</code> 作为图片URL的占位符。<br>
-              <strong>示例1:</strong> <code>https://api.scrape.do/?token=xxx&url=\${image}</code><br>
-              <strong>示例2:</strong> <code>https://your-proxy.com/\${image}</code><br>
-              <strong>示例3:</strong> <code>https://images.weserv.nl/?url=\${image}</code><br>
-              留空则不启用图片代理，直接加载原始图片。<br>
-              <strong>注意:</strong> 点击图片会打开代理后的URL。
+              <strong>示例:</strong> <code>https://images.weserv.nl/?url=\${image}</code><br>
+              留空则不启用代理。
             </p>
         </div>
         <div class="form-group">
-            <label class="form-label">URL 编码设置</label>
+            <label class="form-label">URL 编码</label>
             <div class="toggle-wrapper">
                 <div id="url_encode_toggle" class="toggle" onclick="toggleEncode()"></div>
-                <span class="toggle-label" id="encode_label">关闭 - 图片URL不进行编码</span>
+                <span class="toggle-label" id="encode_label">关闭</span>
             </div>
-            <p class="form-hint">
-              某些代理服务需要对图片URL进行编码（如 scrape.do 使用 url= 参数时）。<br>
-              开启后，图片URL会使用 encodeURIComponent 进行编码。<br>
-              如果代理模板是路径形式（如 /proxy/\${image}），通常不需要开启。
-            </p>
+            <p class="form-hint">开启后图片URL会进行 encodeURIComponent 编码。</p>
         </div>
 
-        <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">缓存配置 (服务端)</h3>
+        <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">缓存配置</h3>
         <div class="form-group">
             <p class="form-hint">
-              <i class="fas fa-info-circle"></i> 缓存由服务端管理，当前配置：<br>
-              • RSS 数据缓存：<strong>${DEFAULT_CONFIG.RSS_CACHE_TTL}</strong> 秒 (${Math.round(DEFAULT_CONFIG.RSS_CACHE_TTL / 60)} 分钟)<br>
-              • Jina 内容缓存：<strong>${DEFAULT_CONFIG.JINA_CACHE_TTL}</strong> 秒 (${Math.round(DEFAULT_CONFIG.JINA_CACHE_TTL / 86400)} 天)
+              • RSS 缓存：${Math.round(DEFAULT_CONFIG.RSS_CACHE_TTL / 60)} 分钟<br>
+              • Jina 缓存：${Math.round(DEFAULT_CONFIG.JINA_CACHE_TTL / 86400)} 天
             </p>
         </div>
 
-        <div style="margin-top:3rem; display:flex; gap:15px;">
-            <button class="btn" onclick="save()"><i class="fas fa-save"></i> 保存配置</button>
-            <button class="btn btn-outline" onclick="reset()">恢复默认</button>
+        <div style="margin-top:2rem; display:flex; gap:15px;">
+            <button class="btn" onclick="save()"><i class="fas fa-save"></i> 保存</button>
+            <button class="btn btn-outline" onclick="reset()">重置</button>
         </div>
         
-        <div id="test-section" style="margin-top:2rem; padding-top:2rem; border-top:1px solid #e5e7eb;">
-            <h4 style="margin-bottom:1rem; font-size:1rem;">测试图片代理</h4>
-            <p class="form-hint" style="margin-bottom:1rem;">保存配置后，点击下方图片应打开代理后的URL：</p>
-            <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <div style="margin-top:2rem; padding-top:2rem; border-top:1px solid #e5e7eb;">
+            <h4 style="margin-bottom:1rem;">测试代理</h4>
+            <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start;">
                 <img id="test-img" class="lazy" 
                      src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                      data-src="https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png"
                      data-original="https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png"
-                     style="max-width:200px; height:auto; border-radius:8px; border:1px solid #e5e7eb; cursor:pointer;">
-                <div style="flex:1; min-width:200px;">
-                    <p style="font-size:0.85rem; color:#6b7280;">原始URL:</p>
-                    <code style="font-size:0.75rem; word-break:break-all; display:block; padding:0.5rem; background:#f3f4f6; border-radius:4px;">https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png</code>
-                    <p style="font-size:0.85rem; color:#6b7280; margin-top:0.5rem;">代理后URL (点击图片会打开此地址):</p>
-                    <code id="proxied-url" style="font-size:0.75rem; word-break:break-all; color:var(--primary); display:block; padding:0.5rem; background:#f5f3ff; border-radius:4px;"></code>
+                     style="max-width:150px; height:auto; border-radius:8px; border:1px solid #e5e7eb;">
+                <div style="flex:1; min-width:200px; font-size:0.8rem;">
+                    <p style="color:#6b7280; margin-bottom:0.3rem;">原始:</p>
+                    <code style="word-break:break-all; display:block; padding:0.3rem; background:#f3f4f6; border-radius:4px; font-size:0.7rem;">https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png</code>
+                    <p style="color:#6b7280; margin:0.5rem 0 0.3rem;">代理后:</p>
+                    <code id="proxied-url" style="word-break:break-all; color:var(--primary); display:block; padding:0.3rem; background:#f5f3ff; border-radius:4px; font-size:0.7rem;"></code>
+                    <p style="color:#6b7280; margin:0.5rem 0 0.3rem;">shouldProxy 结果:</p>
+                    <code id="should-proxy-result" style="display:block; padding:0.3rem; background:#f3f4f6; border-radius:4px; font-size:0.7rem;"></code>
                 </div>
             </div>
-            <button class="btn btn-outline" style="margin-top:1rem;" onclick="testProxy()"><i class="fas fa-sync"></i> 重新测试</button>
+            <button class="btn btn-outline" style="margin-top:1rem;" onclick="testProxy()"><i class="fas fa-sync"></i> 测试</button>
         </div>
       </div>
       <script>
         const $=id=>document.getElementById(id);
         
-        // 加载保存的设置
         $('base').value = localStorage.getItem('r_base') || '';
         $('key').value = localStorage.getItem('r_key') || '';
         $('img_proxy').value = localStorage.getItem('img_proxy_url') || '';
         
-        // 初始化URL编码开关状态
         const urlEncodeEnabled = localStorage.getItem('img_url_encode') === 'true';
         updateEncodeToggle(urlEncodeEnabled);
         
@@ -712,17 +591,16 @@ async function handler(req: Request): Promise<Response> {
             const label = $('encode_label');
             if(enabled) {
                 toggle.classList.add('active');
-                label.textContent = '开启 - 图片URL将进行编码';
+                label.textContent = '开启';
             } else {
                 toggle.classList.remove('active');
-                label.textContent = '关闭 - 图片URL不进行编码';
+                label.textContent = '关闭';
             }
         }
         
         function toggleEncode() {
             const toggle = $('url_encode_toggle');
-            const isActive = toggle.classList.contains('active');
-            updateEncodeToggle(!isActive);
+            updateEncodeToggle(!toggle.classList.contains('active'));
         }
 
         function save(){
@@ -730,23 +608,23 @@ async function handler(req: Request): Promise<Response> {
             localStorage.setItem('r_key', $('key').value.trim());
             localStorage.setItem('img_proxy_url', $('img_proxy').value.trim());
             localStorage.setItem('img_url_encode', $('url_encode_toggle').classList.contains('active') ? 'true' : 'false');
-            alert('设置已保存！');
+            alert('已保存！');
             testProxy();
         }
         
-        function reset(){ 
-            localStorage.clear(); 
-            location.reload(); 
-        }
+        function reset(){ localStorage.clear(); location.reload(); }
         
         function testProxy() {
             const config = getProxyConfig();
             const testUrl = 'https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png';
+            
+            const shouldProxyResult = shouldProxy(testUrl);
+            $('should-proxy-result').textContent = shouldProxyResult ? 'true (会代理)' : 'false (不代理)';
+            $('should-proxy-result').style.color = shouldProxyResult ? '#10b981' : '#ef4444';
+            
             const proxiedUrl = applyProxy(testUrl, config);
+            $('proxied-url').textContent = proxiedUrl || '(未配置代理)';
             
-            $('proxied-url').textContent = proxiedUrl || '(未配置代理，使用原始URL)';
-            
-            // 重新加载测试图片
             const testImg = $('test-img');
             testImg.classList.remove('loaded');
             testImg.classList.add('lazy');
@@ -756,12 +634,10 @@ async function handler(req: Request): Promise<Response> {
             testImg.removeAttribute('data-final-src');
             testImg.onclick = null;
             
-            // 触发懒加载
             setTimeout(() => initLazyLoad(), 100);
         }
         
-        // 页面加载后测试
-        setTimeout(testProxy, 500);
+        setTimeout(testProxy, 300);
       </script>
     `;
     return new Response(render(html, "settings", "设置"), {
@@ -806,7 +682,6 @@ async function handler(req: Request): Promise<Response> {
     );
   }
 
-  // 分类页面（首页和各分类）
   let catId = "latest",
     title = "最新话题";
   if (path.startsWith("/category/")) {
@@ -819,31 +694,23 @@ async function handler(req: Request): Promise<Response> {
     const file = CATEGORIES.find((c) => c.id === catId)?.file || "latest.xml";
     const rssUrl = `${DEFAULT_CONFIG.RSS_BASE_URL}/${file}`;
 
-    const res = await fetchWithCache(rssUrl, {
-      ttl: DEFAULT_CONFIG.RSS_CACHE_TTL,
-    });
+    const res = await fetchWithCache(rssUrl, { ttl: DEFAULT_CONFIG.RSS_CACHE_TTL });
 
     const xml = await res.text();
     const cached = res.headers.has("x-cached-time");
     const cachedTime = res.headers.get("x-cached-time");
-    const cacheAge = cachedTime
-      ? Math.round((Date.now() - parseInt(cachedTime)) / 1000)
-      : 0;
+    const cacheAge = cachedTime ? Math.round((Date.now() - parseInt(cachedTime)) / 1000) : 0;
 
     const items = parseRSS(xml);
 
     const html = `
       <div class="grid">
-        ${items
-          .map(
-            (item) => `
+        ${items.map((item) => `
           <div class="card">
             <div class="card-title">
                 <a href="${item.link}" target="_blank">${item.title}</a>
             </div>
-            
             <div class="card-body">${item.descriptionHTML}</div>
-            
             <div class="card-meta">
               <div class="meta-item">
                 <i class="far fa-user-circle"></i>
@@ -854,22 +721,17 @@ async function handler(req: Request): Promise<Response> {
                 <span>${formatToBeijingTime(item.pubDate)}</span>
               </div>
             </div>
-
             <div class="action-bar">
                 <a href="/topic/${item.topicId}" target="_blank" class="btn-action primary"><i class="fas fa-book-open"></i> Jina 浏览</a>
                 <a href="${item.link}" target="_blank" class="btn-action"><i class="fas fa-external-link-alt"></i> 阅读原文</a>
             </div>
           </div>
-        `
-          )
-          .join("")}
+        `).join("")}
       </div>
       <div class="cache-info">
-        ${
-          cached
-            ? `<i class="fas fa-bolt" style="color:#10b981"></i> 数据已缓存 (${cacheAge}秒前更新，${Math.max(0, DEFAULT_CONFIG.RSS_CACHE_TTL - cacheAge)}秒后刷新)`
-            : `<i class="fas fa-sync"></i> 数据已刷新`
-        }
+        ${cached
+          ? `<i class="fas fa-bolt" style="color:#10b981"></i> 缓存 (${cacheAge}秒前，${Math.max(0, DEFAULT_CONFIG.RSS_CACHE_TTL - cacheAge)}秒后刷新)`
+          : `<i class="fas fa-sync"></i> 已刷新`}
       </div>
     `;
     return new Response(render(html, catId, title), {
