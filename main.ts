@@ -94,12 +94,38 @@ async function fetchWithCache(
 
 // --- 核心工具 ---
 
+function isSmallImage(src: string): boolean {
+  // 检测是否为小图片（表情、头像等）
+  const smallImagePatterns = [
+    /\/user_avatar\/.*\/\d+\/\d+_\d+\.png/i,  // 用户头像
+    /\/images\/emoji\//i,                       // 表情图片
+    /\/letter_avatar\//i,                       // 字母头像
+    /twemoji/i,                                 // Twitter emoji
+    /emoji/i,                                   // 通用emoji
+    /avatar/i,                                  // 头像
+    /favicon/i,                                 // 网站图标
+  ];
+  
+  // 检测URL中的尺寸参数
+  const sizeMatch = src.match(/\/(\d+)_\d+\.png/);
+  if (sizeMatch && parseInt(sizeMatch[1]) <= 96) {
+    return true;
+  }
+  
+  // 检测是否匹配小图片模式
+  return smallImagePatterns.some(pattern => pattern.test(src));
+}
+
 function processHtmlImagesLazy(html: string): string {
   return html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi, (match, src) => {
     if (src.startsWith('data:')) return match;
+    
+    const isSmall = isSmallImage(src);
+    const extraClass = isSmall ? ' img-small' : '';
+    
     return match
       .replace(src, "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
-      .replace("<img", `<img data-src="${src}" data-original="${src}" class="lazy"`);
+      .replace("<img", `<img data-src="${src}" data-original="${src}" class="lazy${extraClass}"`);
   });
 }
 
@@ -238,6 +264,8 @@ html { scroll-behavior: smooth; }
 .card-body { font-size: 0.95rem; color: #4b5563; line-height: 1.6; margin-bottom: 1.2rem; overflow-wrap: anywhere; word-break: break-word; user-select: text; -webkit-user-select: text; cursor: text; }
 .card-body * { max-width: 100% !important; box-sizing: border-box; }
 .card-body img { display: block; height: auto; border-radius: 8px; margin: 12px 0; background: #f3f4f6; transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out; pointer-events: auto; cursor: pointer; min-height: 50px; }
+/* 小图片样式（表情、头像等）- 保持原始尺寸不拉伸 */
+.card-body img.img-small { display: inline; width: auto !important; max-width: none !important; height: auto !important; max-height: 24px; min-height: auto; margin: 0 2px; vertical-align: middle; border-radius: 4px; background: transparent; }
 .card-body pre, .card-body table { display: block; width: 100%; overflow-x: auto; background: #f8fafc; border-radius: 8px; border: 1px solid #f1f5f9; margin: 10px 0; padding: 10px; }
 .card-body small, .card-body a[href*="topic"] { display: none !important; }
 .card-body br { display: block; content: ""; margin-bottom: 6px; }
@@ -246,6 +274,9 @@ html { scroll-behavior: smooth; }
 img.lazy { opacity: 0.5; filter: blur(5px); }
 img.lazy.loading { opacity: 0.7; }
 img.lazy.loaded, img.loaded { opacity: 1; filter: blur(0); }
+/* 小图片懒加载状态 */
+img.img-small.lazy { opacity: 0.5; filter: blur(2px); min-height: auto; }
+img.img-small.loaded { opacity: 1; filter: blur(0); }
 
 .card-meta { margin-top: auto; padding-top: 1rem; border-top: 1px solid #f3f4f6; font-size: 0.85rem; color: var(--text-light); display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .meta-item { display: flex; align-items: center; gap: 6px; }
@@ -287,6 +318,8 @@ img.lazy.loaded, img.loaded { opacity: 1; filter: blur(0); }
 .markdown-body img { transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out; min-height: 50px; background: #f3f4f6; border-radius: 8px; cursor: pointer; }
 .markdown-body img.lazy { opacity: 0.5; filter: blur(5px); }
 .markdown-body img.loaded { opacity: 1; filter: blur(0); }
+/* Markdown中的小图片 */
+.markdown-body img.img-small { display: inline; width: auto !important; max-width: none !important; height: auto !important; max-height: 24px; min-height: auto; margin: 0 2px; vertical-align: middle; border-radius: 4px; background: transparent; }
 
 /* Loading skeleton */
 .grid-loading { display: flex; flex-wrap: wrap; margin: 0 -12px; }
@@ -361,6 +394,26 @@ const IMAGE_PROXY_SCRIPT = `
         };
         img.setAttribute('data-final-src', finalSrc);
     }
+    
+    function isSmallImageUrl(url) {
+        if (!url) return false;
+        const smallImagePatterns = [
+            /\\/user_avatar\\/.*\\/\\d+\\/\\d+_\\d+\\.png/i,
+            /\\/images\\/emoji\\//i,
+            /\\/letter_avatar\\//i,
+            /twemoji/i,
+            /emoji/i,
+            /avatar/i,
+            /favicon/i
+        ];
+        
+        const sizeMatch = url.match(/\\/(\\d+)_\\d+\\.png/);
+        if (sizeMatch && parseInt(sizeMatch[1]) <= 96) {
+            return true;
+        }
+        
+        return smallImagePatterns.some(pattern => pattern.test(url));
+    }
 
     function initLazyLoad() {
         const config = getProxyConfig();
@@ -379,6 +432,11 @@ const IMAGE_PROXY_SCRIPT = `
                         }
                         
                         img.classList.add('loading');
+                        
+                        // 检测是否为小图片并添加相应class
+                        if (isSmallImageUrl(originalSrc) && !img.classList.contains('img-small')) {
+                            img.classList.add('img-small');
+                        }
                         
                         const tempImg = new Image();
                         tempImg.onload = function() {
@@ -425,6 +483,7 @@ const IMAGE_PROXY_SCRIPT = `
     window.isValidProxyTemplate = isValidProxyTemplate;
     window.willUseProxy = willUseProxy;
     window.bindImageClick = bindImageClick;
+    window.isSmallImageUrl = isSmallImageUrl;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initLazyLoad);
@@ -583,7 +642,9 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
             
             html = html.replace(/<img\\s+([^>]*)src=["']([^"']+)["']([^>]*)>/gi, function(match, before, src, after) {
                 if (src.startsWith('data:')) return match;
-                return '<img ' + before + 'src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="' + src + '" data-original="' + src + '" class="lazy"' + after + '>';
+                const isSmall = window.isSmallImageUrl && window.isSmallImageUrl(src);
+                const extraClass = isSmall ? ' img-small' : '';
+                return '<img ' + before + 'src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="' + src + '" data-original="' + src + '" class="lazy' + extraClass + '"' + after + '>';
             });
             
             document.getElementById('md').innerHTML = html;
