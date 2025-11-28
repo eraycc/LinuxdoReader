@@ -5,8 +5,9 @@ const DEFAULT_CONFIG = {
   RSS_BASE_URL: Deno.env.get("RSS_BASE_URL") || "https://linuxdorss.longpink.com",
   JINA_BASE_URL: Deno.env.get("JINA_BASE_URL") || "https://r.jina.ai",
   JINA_API_KEY: Deno.env.get("JINA_API_KEY") || "",
-  SCRAPE_BASE_URL: Deno.env.get("SCRAPE_BASE_URL") || "https://api.scrape.do",
-  SCRAPE_TOKEN: Deno.env.get("SCRAPE_TOKEN") || "",
+  // 图片代理配置
+  IMAGE_PROXY_URL: Deno.env.get("IMAGE_PROXY_URL") || "", // 默认空值，不启用代理
+  IMAGE_PROXY_ENCODE: Deno.env.get("IMAGE_PROXY_ENCODE") === "true", // 默认关闭URL编码
   // 缓存时间配置（单位：秒）
   RSS_CACHE_TTL: parseInt(Deno.env.get("RSS_CACHE_TTL") || "600"), // 默认 10 分钟
   JINA_CACHE_TTL: parseInt(Deno.env.get("JINA_CACHE_TTL") || "604800"), // 默认 7 天
@@ -103,32 +104,36 @@ async function fetchWithCache(
 
 // --- 核心工具 ---
 
-function proxifyImage(url: string, token: string, baseUrl: string): string {
-  if (!token || !url) return url;
-  const cleanBase = baseUrl.replace(/\/$/, "");
-
-  const isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(url);
-  const isLinuxDoUpload = url.includes("linux.do/uploads");
-
-  if (isImage || isLinuxDoUpload) {
-    return `${cleanBase}/?token=${token}&url=${encodeURIComponent(url)}`;
-  }
-  return url;
+/**
+ * 使用通用代理模板处理图片 URL
+ * @param url 原始图片 URL
+ * @param proxyUrl 代理模板，包含 ${image} 占位符
+ * @param encodeUrl 是否对图片 URL 进行 URL 编码
+ */
+function proxifyImage(url: string, proxyUrl: string, encodeUrl: boolean): string {
+  if (!proxyUrl || !url) return url;
+  
+  // 如果代理模板不包含 ${image} 占位符，直接返回原 URL
+  if (!proxyUrl.includes("${image}")) return url;
+  
+  // 替换占位符，根据配置决定是否编码
+  const imageUrl = encodeUrl ? encodeURIComponent(url) : url;
+  return proxyUrl.replace("${image}", imageUrl);
 }
 
-function processHtmlImagesLazy(html: string, token: string, baseUrl: string): string {
+function processHtmlImagesLazy(html: string, proxyUrl: string, encodeUrl: boolean): string {
   return html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi, (match, src) => {
-    const realUrl = proxifyImage(src, token, baseUrl);
+    const realUrl = proxifyImage(src, proxyUrl, encodeUrl);
     return match
       .replace(src, "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
       .replace("<img", `<img data-src="${realUrl}" class="lazy"`);
   });
 }
 
-function processMarkdownImagesLazy(md: string, token: string, baseUrl: string): string {
+function processMarkdownImagesLazy(md: string, proxyUrl: string, encodeUrl: boolean): string {
   return md.replace(/!\[(.*?)\]\((.*?)\)/g, (match, alt, src) => {
     const [cleanSrc, title] = src.split(/\s+"'/);
-    const realUrl = proxifyImage(cleanSrc, token, baseUrl);
+    const realUrl = proxifyImage(cleanSrc, proxyUrl, encodeUrl);
     const titleAttr = title ? ` title="${title}"` : "";
     return `<img alt="${alt}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="${realUrl}" class="lazy"${titleAttr}>`;
   });
@@ -180,7 +185,7 @@ interface RSSItem {
   creator: string;
 }
 
-function parseRSS(xml: string, scrapeToken: string, scrapeBase: string): RSSItem[] {
+function parseRSS(xml: string, proxyUrl: string, encodeUrl: boolean): RSSItem[] {
   const items: RSSItem[] = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
   let match;
@@ -204,7 +209,7 @@ function parseRSS(xml: string, scrapeToken: string, scrapeBase: string): RSSItem
     const topicIdMatch = link.match(/\/topic\/(\d+)/);
     if (link && topicIdMatch) {
       let desc = extract("description");
-      desc = processHtmlImagesLazy(desc, scrapeToken, scrapeBase);
+      desc = processHtmlImagesLazy(desc, proxyUrl, encodeUrl);
 
       const pubDateStr = extract("pubDate");
       const pubDateTimestamp = new Date(pubDateStr).getTime() || 0;
@@ -350,6 +355,36 @@ img.lazy { opacity: 0.3; } img.loaded { opacity: 1; }
 .btn-action.primary { background: #f5f3ff; color: var(--primary); border-color: #ddd6fe; }
 .btn-action:hover { transform: translateY(-1px); filter: brightness(0.97); }
 
+/* 设置页面开关样式 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 24px;
+  vertical-align: middle;
+  margin-left: 10px;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 24px;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px; width: 16px;
+  left: 4px; bottom: 4px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+input:checked + .slider { background-color: var(--primary); }
+input:checked + .slider:before { transform: translateX(26px); }
+
 /* Reader & Settings */
 .reader { background: #fff; padding: 2.5rem; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
 .form-group { margin-bottom: 2rem; }
@@ -415,9 +450,11 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
         (async () => {
           const h = {};
           const b = localStorage.getItem('r_base'), k = localStorage.getItem('r_key');
-          const sb = localStorage.getItem('s_base'), sk = localStorage.getItem('s_key');
+          const proxyUrl = localStorage.getItem('img_proxy_url');
+          const proxyEncode = localStorage.getItem('img_proxy_encode') === 'true';
           if(b) h['x-base'] = b; if(k) h['x-key'] = k;
-          if(sb) h['x-scrape-base'] = sb; if(sk) h['x-scrape-key'] = sk;
+          if(proxyUrl) h['x-img-proxy-url'] = proxyUrl;
+          if(proxyEncode) h['x-img-proxy-encode'] = 'true';
           try {
             const r = await fetch('/api/jina?url=' + encodeURIComponent(${urlJS}), {headers:h});
             const d = await r.json();
@@ -452,8 +489,8 @@ async function handler(req: Request): Promise<Response> {
     const h: Record<string, string> = {};
     const key = req.headers.get("x-key") || DEFAULT_CONFIG.JINA_API_KEY;
     const base = req.headers.get("x-base") || DEFAULT_CONFIG.JINA_BASE_URL;
-    const scrapeKey = req.headers.get("x-scrape-key") || DEFAULT_CONFIG.SCRAPE_TOKEN;
-    const scrapeBase = req.headers.get("x-scrape-base") || DEFAULT_CONFIG.SCRAPE_BASE_URL;
+    const proxyUrl = req.headers.get("x-img-proxy-url") || DEFAULT_CONFIG.IMAGE_PROXY_URL;
+    const proxyEncode = req.headers.get("x-img-proxy-encode") === "true" || DEFAULT_CONFIG.IMAGE_PROXY_ENCODE;
     if (key) h["Authorization"] = `Bearer ${key}`;
 
     try {
@@ -476,7 +513,7 @@ async function handler(req: Request): Promise<Response> {
       let md = text;
       const idx = text.indexOf("Markdown Content:");
       if (idx > -1) md = text.substring(idx + 17).trim();
-      md = processMarkdownImagesLazy(md, scrapeKey, scrapeBase);
+      md = processMarkdownImagesLazy(md, proxyUrl, proxyEncode);
 
       const t = text.match(/Title: (.+)/),
         d = text.match(/Published Time: (.+)/),
@@ -514,16 +551,27 @@ async function handler(req: Request): Promise<Response> {
             <p class="form-hint">如果你有 Jina Pro 账号，填入 Key 可获得更高额度。留空使用免费额度。</p>
         </div>
 
-        <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">Scrape.do (图片加速)</h3>
+        <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">图片代理设置</h3>
         <div class="form-group">
-            <label class="form-label">Scrape Base URL</label>
-            <input id="s_base" class="form-input" placeholder="${DEFAULT_CONFIG.SCRAPE_BASE_URL}">
-            <p class="form-hint">Scrape.do 的 API 接入点。</p>
+            <label class="form-label">图片代理 URL</label>
+            <input id="img_proxy_url" class="form-input" placeholder="${DEFAULT_CONFIG.IMAGE_PROXY_URL || '留空则不启用代理'}">
+            <p class="form-hint">
+              <strong>支持通用模板！</strong> 使用 <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:0.85rem">\${image}</code> 作为图片链接占位符。<br>
+              示例：<br>
+              • <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:0.85rem">https://api.scrape.do/?token=xxx&url=\${image}</code><br>
+              • <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:0.85rem">https://domain.com/proxy/\${image}</code><br>
+              留空则不启用图片代理。
+            </p>
         </div>
-        <div class="form-group">
-            <label class="form-label">Scrape Token</label>
-            <input id="s_token" class="form-input" placeholder="例如: 4a2b...">
-            <p class="form-hint"><strong>强烈推荐配置！</strong> 用于绕过 Cloudflare 盾，修复 RSS 列表和文章详情中的图片加载失败问题。</p>
+        <div class="form-group" style="display:flex;align-items:center;margin-top:1rem">
+            <label class="form-label" style="margin-bottom:0">对图片地址进行 URL 编码</label>
+            <label class="switch">
+              <input type="checkbox" id="img_proxy_encode">
+              <span class="slider"></span>
+            </label>
+            <p class="form-hint" style="margin-top:0.5rem;width:100%">
+              根据你的代理服务需求决定是否开启。例如 Scrape.do 需要编码，而简单路径拼接则不需要。
+            </p>
         </div>
 
         <h3 style="border-bottom:1px solid #f3f4f6; padding-bottom:0.8rem; margin:2.5rem 0 1.5rem 0; font-size:1.1rem;">缓存配置 (服务端)</h3>
@@ -544,14 +592,14 @@ async function handler(req: Request): Promise<Response> {
         const $=id=>document.getElementById(id);
         $('base').value = localStorage.getItem('r_base') || '';
         $('key').value = localStorage.getItem('r_key') || '';
-        $('s_base').value = localStorage.getItem('s_base') || '';
-        $('s_token').value = localStorage.getItem('s_key') || '';
+        $('img_proxy_url').value = localStorage.getItem('img_proxy_url') || '';
+        $('img_proxy_encode').checked = localStorage.getItem('img_proxy_encode') === 'true';
 
         function save(){
             localStorage.setItem('r_base', $('base').value.trim());
             localStorage.setItem('r_key', $('key').value.trim());
-            localStorage.setItem('s_base', $('s_base').value.trim());
-            localStorage.setItem('s_key', $('s_token').value.trim());
+            localStorage.setItem('img_proxy_url', $('img_proxy_url').value.trim());
+            localStorage.setItem('img_proxy_encode', $('img_proxy_encode').checked);
             alert('设置已保存！刷新首页即可生效。');
         }
         function reset(){ localStorage.clear(); location.reload(); }
@@ -624,9 +672,9 @@ async function handler(req: Request): Promise<Response> {
       ? Math.round((Date.now() - parseInt(cachedTime)) / 1000)
       : 0;
 
-    const scrapeKey = req.headers.get("x-scrape-key") || DEFAULT_CONFIG.SCRAPE_TOKEN;
-    const scrapeBase = req.headers.get("x-scrape-base") || DEFAULT_CONFIG.SCRAPE_BASE_URL;
-    const items = parseRSS(xml, scrapeKey, scrapeBase);
+    const proxyUrl = DEFAULT_CONFIG.IMAGE_PROXY_URL;
+    const proxyEncode = DEFAULT_CONFIG.IMAGE_PROXY_ENCODE;
+    const items = parseRSS(xml, proxyUrl, proxyEncode);
 
     const html = `
       <div class="grid">
@@ -669,16 +717,18 @@ async function handler(req: Request): Promise<Response> {
       </div>
       <script>
          document.addEventListener('DOMContentLoaded', () => {
-            const token = localStorage.getItem('s_key');
-            let base = localStorage.getItem('s_base');
-            if(!base) base = '${DEFAULT_CONFIG.SCRAPE_BASE_URL}';
+            const proxyUrl = localStorage.getItem('img_proxy_url');
+            const proxyEncode = localStorage.getItem('img_proxy_encode') === 'true';
 
-            if(token) {
+            if(proxyUrl) {
                 document.querySelectorAll('img.lazy').forEach(img => {
                     const o = img.getAttribute('data-src');
-                    if(o && !o.includes(base)) {
-                        const finalBase = base.endsWith('/') ? base : base + '/';
-                        img.setAttribute('data-src', \`\${finalBase}?token=\${token}&url=\${encodeURIComponent(o)}\`);
+                    if(o && !proxyUrl.includes('$\{image\}')) return; // 跳过不包含占位符的代理配置
+                    
+                    if(o && !o.includes(proxyUrl.split('$\{image\}')[0])) {
+                        // 只对尚未代理过的图片进行处理
+                        let finalUrl = proxyUrl.replace('$\{image\}', proxyEncode ? encodeURIComponent(o) : o);
+                        img.setAttribute('data-src', finalUrl);
                     }
                 });
             }
