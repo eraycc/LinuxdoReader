@@ -545,8 +545,8 @@ async function handler(req: Request): Promise<Response> {
             <label class="form-label">图片代理URL模板</label>
             <input id="img_proxy" class="form-input" placeholder="例如: https://proxy.example.com/?url=\${image}">
             <p class="form-hint">
-              使用 <code>\${image}</code> 作为图片URL的占位符。<br>
-              <strong>示例:</strong> <code>https://images.weserv.nl/?url=\${image}</code><br>
+              用于过CF盾代理图片，使用 <code>\${image}</code> 作为图片URL的占位符。<br>
+              <strong>示例:</strong> <code>https://api.scrape.do/?token=TOKEN&url=\${image}</code><br>
               留空则不启用代理。必须以 http:// 或 https:// 开头，且包含 \${image} 占位符。
             </p>
         </div>
