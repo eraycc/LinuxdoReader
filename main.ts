@@ -31,8 +31,21 @@ const CATEGORIES = [
 
 interface CacheOptions {
   ttl: number; // 缓存有效期（秒）
-  cacheKey?: string; // 自定义缓存键
+  cacheKey?: string; // 自定义缓存键（会被转换为有效URL）
   refresh?: boolean; // 是否强制刷新
+}
+
+/**
+ * 将自定义缓存键转换为有效的 URL 格式
+ * Cache API 要求 Request 必须是有效的 http/https URL
+ */
+function buildCacheUrl(key: string): string {
+  // 如果已经是有效的 http/https URL，直接返回
+  if (key.startsWith("http://") || key.startsWith("https://")) {
+    return key;
+  }
+  // 否则构造一个虚拟的缓存 URL
+  return `https://cache.local/${encodeURIComponent(key)}`;
 }
 
 async function fetchWithCache(
@@ -41,7 +54,7 @@ async function fetchWithCache(
   fetchOptions: RequestInit = {}
 ): Promise<Response> {
   const cache = await caches.open("linuxdo-reader-cache");
-  const cacheKey = options.cacheKey || url;
+  const cacheKey = buildCacheUrl(options.cacheKey || url);
   const req = new Request(cacheKey);
 
   // 检查是否需要强制刷新
@@ -53,10 +66,10 @@ async function fetchWithCache(
       if (cachedTime) {
         const age = (Date.now() - parseInt(cachedTime)) / 1000;
         if (age < options.ttl) {
-          console.log(`[缓存命中] ${cacheKey} (剩余 ${Math.round(options.ttl - age)}秒)`);
+          console.log(`[缓存命中] ${options.cacheKey || url} (剩余 ${Math.round(options.ttl - age)}秒)`);
           return cached.clone();
         } else {
-          console.log(`[缓存过期] ${cacheKey}`);
+          console.log(`[缓存过期] ${options.cacheKey || url}`);
         }
       }
     }
@@ -73,7 +86,7 @@ async function fetchWithCache(
     const body = await res.arrayBuffer();
     const headers = new Headers(res.headers);
     headers.set("x-cached-time", Date.now().toString());
-    
+
     const cachedResponse = new Response(body, {
       status: res.status,
       statusText: res.statusText,
@@ -81,7 +94,7 @@ async function fetchWithCache(
     });
 
     await cache.put(req, cachedResponse.clone());
-    console.log(`[已缓存] ${cacheKey} (TTL: ${options.ttl}秒)`);
+    console.log(`[已缓存] ${options.cacheKey || url} (TTL: ${options.ttl}秒)`);
     return cachedResponse;
   }
 
@@ -451,10 +464,9 @@ async function handler(req: Request): Promise<Response> {
         : `${base}/https://linux.do${target}`;
 
       // 使用缓存获取 Jina 结果
-      const cacheKey = `jina:${apiUrl}`;
       const res = await fetchWithCache(
         apiUrl,
-        { ttl: DEFAULT_CONFIG.JINA_CACHE_TTL, cacheKey },
+        { ttl: DEFAULT_CONFIG.JINA_CACHE_TTL, cacheKey: `jina-${encodeURIComponent(apiUrl)}` },
         { headers: h }
       );
 
@@ -600,10 +612,9 @@ async function handler(req: Request): Promise<Response> {
     const file = CATEGORIES.find((c) => c.id === catId)?.file || "latest.xml";
     const rssUrl = `${DEFAULT_CONFIG.RSS_BASE_URL}/${file}`;
 
-    // 使用缓存获取 RSS
+    // 使用缓存获取 RSS（直接用 rssUrl 作为缓存键，它本身就是有效的 https URL）
     const res = await fetchWithCache(rssUrl, {
       ttl: DEFAULT_CONFIG.RSS_CACHE_TTL,
-      cacheKey: `rss:${file}`,
     });
 
     const xml = await res.text();
@@ -652,7 +663,7 @@ async function handler(req: Request): Promise<Response> {
       <div class="cache-info">
         ${
           cached
-            ? `<i class="fas fa-bolt" style="color:#10b981"></i> 数据已缓存 (${cacheAge}秒前更新，${DEFAULT_CONFIG.RSS_CACHE_TTL - cacheAge}秒后刷新)`
+            ? `<i class="fas fa-bolt" style="color:#10b981"></i> 数据已缓存 (${cacheAge}秒前更新，${Math.max(0, DEFAULT_CONFIG.RSS_CACHE_TTL - cacheAge)}秒后刷新)`
             : `<i class="fas fa-sync"></i> 数据已刷新`
         }
       </div>
@@ -679,9 +690,10 @@ async function handler(req: Request): Promise<Response> {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   } catch (e: any) {
-    return new Response(render(`<div style="color:#dc2626">Error: ${e.message}</div>`, catId, "Error"), {
-      headers: { "Content-Type": "text/html" },
-    });
+    return new Response(
+      render(`<div style="color:#dc2626">Error: ${e.message}</div>`, catId, "Error"),
+      { headers: { "Content-Type": "text/html" } }
+    );
   }
 }
 
