@@ -395,8 +395,8 @@ async function handler(req: Request): Promise<Response> {
   }
 
   if (path === "/browser") { return new Response(render(`<div class="reader" style="text-align:center;padding-top:4rem"><h1>Jina Browser</h1><input id="u" class="form-input" style="max-width:600px;margin-top:1rem" placeholder="输入网址..."><button onclick="go()" class="btn" style="margin-top:1rem">开始阅读</button></div><script>function go(){const u=document.getElementById('u').value;if(u)location.href='/read?url='+encodeURIComponent(u)}</script>`, "browser", "Browser"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
-  if (path === "/read") { return new Response(render(renderReaderScript(`'${url.searchParams.get("url")}'`, '/browser', '返回'), "browser", "Read"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
-  if (path.startsWith("/topic/")) { return new Response(render(renderReaderScript(`'/t/topic/${path.split("/")[2]}'`, 'javascript:history.back()', '返回列表'), "topic", "Detail"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
+  if (path === "/read") { return new Response(render(renderReaderScript(`'${url.searchParams.get("url")}'`, '/browser', '返回'), "browser", "浏览"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
+  if (path.startsWith("/topic/")) { return new Response(render(renderReaderScript(`'/t/topic/${path.split("/")[2]}'`, 'javascript:history.back()', '返回列表'), "topic", "详情"), { headers: { "Content-Type": "text/html; charset=utf-8" }}); }
 
   let catId = "latest", title = "最新话题";
   if (path.startsWith("/category/")) { catId = path.split("/")[2]; const c = CATEGORIES.find(x => x.id === catId); if(c) title = c.name; }
