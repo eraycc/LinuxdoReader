@@ -106,19 +106,7 @@ function processHtmlImagesLazy(html: string): string {
     if (src.startsWith('data:')) return match;
     return match
       .replace(src, "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
-      .replace("<img", `<img data-src="${src}" class="lazy"`);
-  });
-}
-
-/**
- * 处理 Markdown 中的图片为懒加载 HTML 格式
- */
-function processMarkdownImagesLazy(md: string): string {
-  return md.replace(/!\[(.*?)\]\((.*?)\)/g, (match, alt, src) => {
-    const [cleanSrc, title] = src.split(/\s+"'/);
-    if (cleanSrc.startsWith('data:')) return match;
-    const titleAttr = title ? ` title="${title}"` : "";
-    return `<img alt="${alt}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="${cleanSrc}" class="lazy"${titleAttr}>`;
+      .replace("<img", `<img data-src="${src}" data-original="${src}" class="lazy"`);
   });
 }
 
@@ -187,7 +175,6 @@ function parseRSS(xml: string): RSSItem[] {
     const topicIdMatch = link.match(/\/topic\/(\d+)/);
     if (link && topicIdMatch) {
       let desc = extract("description");
-      // 只做懒加载处理，不应用代理（代理在前端应用）
       desc = processHtmlImagesLazy(desc);
 
       const pubDateStr = extract("pubDate");
@@ -286,7 +273,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
     border-radius: 8px; 
     margin: 12px 0; 
     background: #f3f4f6; 
-    transition: opacity 0.3s ease-in-out; 
+    transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out; 
     pointer-events: auto;
     cursor: pointer;
     min-height: 50px;
@@ -361,6 +348,7 @@ img.lazy.loaded, img.loaded {
     min-height: 50px;
     background: #f3f4f6;
     border-radius: 8px;
+    cursor: pointer;
 }
 .markdown-body img.lazy {
     opacity: 0.5;
@@ -376,7 +364,6 @@ img.lazy.loaded, img.loaded {
 
 /**
  * 图片代理和懒加载的前端脚本
- * 这个脚本会在前端应用图片代理，并实现真正的懒加载
  */
 const IMAGE_PROXY_SCRIPT = `
 <script>
@@ -409,6 +396,21 @@ const IMAGE_PROXY_SCRIPT = `
         return config.template.replace('\${image}', imageUrl);
     }
 
+    // 绑定图片点击事件
+    function bindImageClick(img, finalSrc) {
+        // 移除旧的点击事件
+        img.onclick = null;
+        // 设置新的点击事件，打开代理后的图片
+        img.style.cursor = 'pointer';
+        img.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.open(finalSrc, '_blank');
+        };
+        // 保存最终URL到data属性
+        img.setAttribute('data-final-src', finalSrc);
+    }
+
     // 初始化懒加载
     function initLazyLoad() {
         const config = getProxyConfig();
@@ -417,11 +419,11 @@ const IMAGE_PROXY_SCRIPT = `
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     const img = entry.target;
-                    let src = img.getAttribute('data-src');
+                    let originalSrc = img.getAttribute('data-src') || img.getAttribute('data-original');
                     
-                    if (src) {
+                    if (originalSrc && !originalSrc.startsWith('data:')) {
                         // 应用代理
-                        const finalSrc = applyProxy(src, config);
+                        const finalSrc = applyProxy(originalSrc, config);
                         
                         img.classList.add('loading');
                         
@@ -431,11 +433,17 @@ const IMAGE_PROXY_SCRIPT = `
                             img.src = finalSrc;
                             img.classList.remove('lazy', 'loading');
                             img.classList.add('loaded');
+                            // 绑定点击事件，跳转到代理后的URL
+                            bindImageClick(img, finalSrc);
                         };
                         tempImg.onerror = function() {
                             // 如果代理失败，尝试原始URL
-                            if (finalSrc !== src) {
-                                img.src = src;
+                            if (finalSrc !== originalSrc) {
+                                img.src = originalSrc;
+                                bindImageClick(img, originalSrc);
+                            } else {
+                                img.src = originalSrc;
+                                bindImageClick(img, originalSrc);
                             }
                             img.classList.remove('lazy', 'loading');
                             img.classList.add('loaded');
@@ -448,12 +456,32 @@ const IMAGE_PROXY_SCRIPT = `
                 }
             });
         }, { 
-            rootMargin: "200px 0px",  // 提前200px开始加载
+            rootMargin: "200px 0px",
             threshold: 0.01 
         });
 
-        document.querySelectorAll('img.lazy[data-src]').forEach(img => {
+        document.querySelectorAll('img.lazy[data-src], img.lazy[data-original]').forEach(img => {
             observer.observe(img);
+        });
+    }
+
+    // 处理已加载的图片（用于动态添加的内容）
+    function processLoadedImages(container) {
+        const config = getProxyConfig();
+        const imgs = container ? container.querySelectorAll('img') : document.querySelectorAll('img');
+        
+        imgs.forEach(img => {
+            // 跳过已处理的图片
+            if (img.hasAttribute('data-final-src')) return;
+            
+            const src = img.src;
+            if (src && !src.startsWith('data:') && shouldProxy(src)) {
+                const finalSrc = applyProxy(src, config);
+                if (finalSrc !== src) {
+                    img.src = finalSrc;
+                }
+                bindImageClick(img, finalSrc);
+            }
         });
     }
 
@@ -461,6 +489,8 @@ const IMAGE_PROXY_SCRIPT = `
     window.initLazyLoad = initLazyLoad;
     window.getProxyConfig = getProxyConfig;
     window.applyProxy = applyProxy;
+    window.processLoadedImages = processLoadedImages;
+    window.bindImageClick = bindImageClick;
 
     // DOM 加载完成后初始化
     if (document.readyState === 'loading') {
@@ -508,12 +538,13 @@ function renderReaderScript(urlJS: string, backLink: string, backText: string) {
             document.getElementById('tt').innerText = d.title;
             document.getElementById('meta').innerHTML = '<span><i class="far fa-clock"></i> ' + (d.date||'未知时间') + '</span>' + ' <a href="'+d.url+'" target="_blank" style="color:inherit;text-decoration:none"><i class="fas fa-external-link-alt"></i> 查看原文</a>' + (d.cached ? ' <span style="color:#10b981"><i class="fas fa-bolt"></i> 已缓存</span>' : '');
             
-            // 解析 Markdown 并处理图片为懒加载
+            // 解析 Markdown
             let html = marked.parse(d.markdown);
-            // 将普通 img 转换为懒加载格式
+            
+            // 将普通 img 转换为懒加载格式，同时保存原始URL
             html = html.replace(/<img\\s+([^>]*)src=["']([^"']+)["']([^>]*)>/gi, function(match, before, src, after) {
                 if (src.startsWith('data:')) return match;
-                return '<img ' + before + 'src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="' + src + '" class="lazy"' + after + '>';
+                return '<img ' + before + 'src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="' + src + '" data-original="' + src + '" class="lazy"' + after + '>';
             });
             
             document.getElementById('md').innerHTML = html;
@@ -567,9 +598,6 @@ async function handler(req: Request): Promise<Response> {
       let md = text;
       const idx = text.indexOf("Markdown Content:");
       if (idx > -1) md = text.substring(idx + 17).trim();
-      
-      // 服务端不应用代理，只返回原始 markdown
-      // 代理在前端应用
 
       const t = text.match(/Title: (.+)/),
         d = text.match(/Published Time: (.+)/),
@@ -617,7 +645,8 @@ async function handler(req: Request): Promise<Response> {
               <strong>示例1:</strong> <code>https://api.scrape.do/?token=xxx&url=\${image}</code><br>
               <strong>示例2:</strong> <code>https://your-proxy.com/\${image}</code><br>
               <strong>示例3:</strong> <code>https://images.weserv.nl/?url=\${image}</code><br>
-              留空则不启用图片代理，直接加载原始图片。
+              留空则不启用图片代理，直接加载原始图片。<br>
+              <strong>注意:</strong> 点击图片会打开代理后的URL。
             </p>
         </div>
         <div class="form-group">
@@ -649,17 +678,18 @@ async function handler(req: Request): Promise<Response> {
         
         <div id="test-section" style="margin-top:2rem; padding-top:2rem; border-top:1px solid #e5e7eb;">
             <h4 style="margin-bottom:1rem; font-size:1rem;">测试图片代理</h4>
-            <p class="form-hint" style="margin-bottom:1rem;">保存配置后，可以测试图片代理是否生效：</p>
+            <p class="form-hint" style="margin-bottom:1rem;">保存配置后，点击下方图片应打开代理后的URL：</p>
             <div style="display:flex; gap:1rem; flex-wrap:wrap;">
                 <img id="test-img" class="lazy" 
                      src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                      data-src="https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png"
-                     style="max-width:200px; height:auto; border-radius:8px; border:1px solid #e5e7eb;">
-                <div>
+                     data-original="https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png"
+                     style="max-width:200px; height:auto; border-radius:8px; border:1px solid #e5e7eb; cursor:pointer;">
+                <div style="flex:1; min-width:200px;">
                     <p style="font-size:0.85rem; color:#6b7280;">原始URL:</p>
-                    <code style="font-size:0.75rem; word-break:break-all;">https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png</code>
-                    <p style="font-size:0.85rem; color:#6b7280; margin-top:0.5rem;">代理后URL:</p>
-                    <code id="proxied-url" style="font-size:0.75rem; word-break:break-all; color:var(--primary);"></code>
+                    <code style="font-size:0.75rem; word-break:break-all; display:block; padding:0.5rem; background:#f3f4f6; border-radius:4px;">https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png</code>
+                    <p style="font-size:0.85rem; color:#6b7280; margin-top:0.5rem;">代理后URL (点击图片会打开此地址):</p>
+                    <code id="proxied-url" style="font-size:0.75rem; word-break:break-all; color:var(--primary); display:block; padding:0.5rem; background:#f5f3ff; border-radius:4px;"></code>
                 </div>
             </div>
             <button class="btn btn-outline" style="margin-top:1rem;" onclick="testProxy()"><i class="fas fa-sync"></i> 重新测试</button>
@@ -714,7 +744,7 @@ async function handler(req: Request): Promise<Response> {
             const testUrl = 'https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png';
             const proxiedUrl = applyProxy(testUrl, config);
             
-            $('proxied-url').textContent = proxiedUrl;
+            $('proxied-url').textContent = proxiedUrl || '(未配置代理，使用原始URL)';
             
             // 重新加载测试图片
             const testImg = $('test-img');
@@ -722,6 +752,9 @@ async function handler(req: Request): Promise<Response> {
             testImg.classList.add('lazy');
             testImg.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
             testImg.setAttribute('data-src', testUrl);
+            testImg.setAttribute('data-original', testUrl);
+            testImg.removeAttribute('data-final-src');
+            testImg.onclick = null;
             
             // 触发懒加载
             setTimeout(() => initLazyLoad(), 100);
@@ -797,7 +830,6 @@ async function handler(req: Request): Promise<Response> {
       ? Math.round((Date.now() - parseInt(cachedTime)) / 1000)
       : 0;
 
-    // 解析 RSS，只做懒加载处理，不应用代理
     const items = parseRSS(xml);
 
     const html = `
