@@ -414,7 +414,7 @@ async function handler(req: Request): Promise<Response> {
           <div class="card">
             <!-- Fix: 只有标题是链接跳转，防止误触 -->
             <div class="card-title">
-                <a href="/topic/${item.topicId}">${item.title}</a>
+                <a href="${item.link}" target="_blank">${item.title}</a>
             </div>
             
             <!-- Fix: 普通 Div，允许选择文字，pointer-events: auto -->
@@ -432,7 +432,7 @@ async function handler(req: Request): Promise<Response> {
             </div>
 
             <div class="action-bar">
-                <a href="/topic/${item.topicId}" class="btn-action primary"><i class="fas fa-book-open"></i> Jina 浏览</a>
+                <a href="/topic/${item.topicId}" target="_blank" class="btn-action primary"><i class="fas fa-book-open"></i> Jina 浏览</a>
                 <a href="${item.link}" target="_blank" class="btn-action"><i class="fas fa-external-link-alt"></i> 阅读原文</a>
             </div>
             <!-- 移除全卡片绝对定位链接 card-link -->
