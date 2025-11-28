@@ -27,7 +27,6 @@ const CATEGORIES = [
 ];
 
 // --- 缓存工具 ---
-
 interface CacheOptions {
   ttl: number;
   cacheKey?: string;
@@ -212,9 +211,28 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
 .menu-btn { width: 36px; height: 36px; display: flex; justify-content: center; align-items: center; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; color: var(--text); cursor: pointer; transition: all 0.2s; }
 .content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
 
-/* Grid & Card */
-.grid { columns: 320px auto; column-gap: 1.5rem; }
-.card { background: var(--card-bg); border-radius: 16px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.02), 0 1px 0 rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); display: flex; flex-direction: column; position: relative; transition: all 0.2s ease; overflow: hidden; break-inside: avoid; margin-bottom: 1.5rem; }
+/* Grid & Card - 使用Masonry布局 */
+.grid {
+  position: relative; /* Masonry需要 */
+  margin: 0 auto; /* 居中 */
+}
+
+.card {
+  width: 320px; /* 固定宽度 */
+  margin-bottom: 1.5rem;
+  float: left; /* 横向排列 */
+  background: var(--card-bg);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02), 0 1px 0 rgba(0,0,0,0.02);
+  border: 1px solid rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
 .card:hover { transform: translateY(-4px); box-shadow: 0 12px 20px -5px rgba(0,0,0,0.1); border-color: rgba(124, 58, 237, 0.1); }
 
 .card-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.8rem; line-height: 1.4; color: #111827; }
@@ -264,7 +282,11 @@ img.lazy.loaded, img.loaded { opacity: 1; filter: blur(0); }
 .markdown-body img.lazy { opacity: 0.5; filter: blur(5px); }
 .markdown-body img.loaded { opacity: 1; filter: blur(0); }
 
-@media (max-width: 768px) { .content { padding: 1rem; } .reader { padding: 1.5rem; } }
+@media (max-width: 768px) { 
+  .content { padding: 1rem; } 
+  .reader { padding: 1.5rem; }
+  .card { width: 100%; } /* 移动端全宽 */
+}
 `;
 
 const IMAGE_PROXY_SCRIPT = `
@@ -277,29 +299,19 @@ const IMAGE_PROXY_SCRIPT = `
         };
     }
 
-    // 检查代理模板是否有效
     function isValidProxyTemplate(template) {
         if (!template || typeof template !== 'string') return false;
         template = template.trim();
         if (!template) return false;
-        // 必须包含占位符
         if (!template.includes('\${image}')) return false;
-        // 必须是有效的URL格式（以 http:// 或 https:// 开头）
         if (!template.startsWith('http://') && !template.startsWith('https://')) return false;
         return true;
     }
 
-    // 判断URL是否是图片
     function isImageUrl(url) {
         if (!url || url.startsWith('data:')) return false;
-        
-        // linux.do 上传图片
         if (url.includes('linux.do/uploads')) return true;
-        
-        // 常见图片扩展名
         if (/\\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|avif)/i.test(url)) return true;
-        
-        // 常见图床域名
         const imageHosts = [
             'imgur.com', 'i.imgur.com',
             'imgtu.com', 'i.imgtu.com',
@@ -311,23 +323,19 @@ const IMAGE_PROXY_SCRIPT = `
             'cdn.nlark.com',
             'img.shields.io'
         ];
-        
         try {
             const urlObj = new URL(url);
             if (imageHosts.some(host => urlObj.hostname.includes(host))) return true;
         } catch {}
-        
         return false;
     }
 
-    // 综合判断：是否会使用代理
     function willUseProxy(url, config) {
         if (!isValidProxyTemplate(config.template)) return false;
         if (!isImageUrl(url)) return false;
         return true;
     }
 
-    // 应用代理
     function applyProxy(url, config) {
         if (!willUseProxy(url, config)) {
             return url;
@@ -371,6 +379,10 @@ const IMAGE_PROXY_SCRIPT = `
                             img.classList.remove('lazy', 'loading');
                             img.classList.add('loaded');
                             bindImageClick(img, finalSrc);
+                            // 触发Masonry重新布局
+                            if (window.masonryInstance) {
+                                window.masonryInstance.layout();
+                            }
                         };
                         tempImg.onerror = function() {
                             console.warn('[Image Proxy] Failed:', finalSrc, 'Fallback to:', originalSrc);
@@ -378,6 +390,9 @@ const IMAGE_PROXY_SCRIPT = `
                             img.classList.remove('lazy', 'loading');
                             img.classList.add('loaded');
                             bindImageClick(img, originalSrc);
+                            if (window.masonryInstance) {
+                                window.masonryInstance.layout();
+                            }
                         };
                         tempImg.src = finalSrc;
                         
@@ -413,12 +428,70 @@ const IMAGE_PROXY_SCRIPT = `
 </script>
 `;
 
+// --- Masonry初始化脚本 ---
+const MASONRY_SCRIPT = `
+<script src="https://unpkg.com/masonry-layout@4/dist/masonry.pkgd.min.js"></script>
+<script>
+  function initMasonry() {
+    const grid = document.querySelector('.grid');
+    if (!grid) return;
+    
+    // 销毁已存在的实例
+    if (window.masonryInstance) {
+      window.masonryInstance.destroy();
+    }
+    
+    // 创建新实例
+    window.masonryInstance = new Masonry(grid, {
+      itemSelector: '.card',
+      columnWidth: 320,
+      gutter: 24,
+      fitWidth: true,
+      horizontalOrder: true, // 关键：强制从左到右排序
+      transitionDuration: '0.2s'
+    });
+    
+    // 图片加载完成后重新布局
+    const handleImageLoad = () => {
+      if (window.masonryInstance) {
+        window.masonryInstance.layout();
+      }
+    };
+    
+    grid.addEventListener('load', handleImageLoad, true);
+    
+    // 延迟加载完成后也重新布局
+    const originalInitLazyLoad = window.initLazyLoad;
+    window.initLazyLoad = function() {
+      originalInitLazyLoad();
+      setTimeout(handleImageLoad, 300);
+    };
+    
+    console.log('[Masonry] 初始化完成');
+  }
+  
+  // 页面加载完成后初始化
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMasonry);
+  } else {
+    initMasonry();
+  }
+  
+  // 窗口调整大小时重新布局
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(initMasonry, 100);
+  });
+</script>
+`;
+
 function render(body: string, activeId: string, title: string) {
   const nav = CATEGORIES.map(
     (c) =>
       `<a href="/category/${c.id}" class="${activeId === c.id ? "active" : ""}"><i style="font-style:normal">${c.icon}</i> ${c.name}</a>`
   ).join("");
-  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} - Linux DO</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.6.1/github-markdown.min.css"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>${CSS}</style></head><body><div class="overlay" onclick="toggle()"></div><nav class="sidebar" id="sb"><div class="brand"><i class="fab fa-linux"></i> Linux DO Reader</div><div class="nav"><a href="/" class="${activeId === "home" ? "active" : ""}"><i class="fas fa-home"></i> 首页广场</a>${nav}<div style="margin:1rem 0; border-top:1px solid rgba(255,255,255,0.1)"></div><a href="/browser" class="${activeId === "browser" ? "active" : ""}"><i class="fas fa-compass"></i> Jina 浏览器</a><a href="/settings" class="${activeId === "settings" ? "active" : ""}"><i class="fas fa-cog"></i> 系统设置</a></div></nav><div class="main"><div class="header"><button class="menu-btn" onclick="toggle()"><i class="fas fa-bars"></i></button><h3>${title}</h3><div style="width:36px"></div></div><div class="content">${body}</div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/marked/13.0.2/marked.min.js"></script><script>function toggle(){document.getElementById('sb').classList.toggle('open');document.querySelector('.overlay').classList.toggle('show')}</script>${IMAGE_PROXY_SCRIPT}</body></html>`;
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} - Linux DO</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.6.1/github-markdown.min.css"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>${CSS}</style></head><body><div class="overlay" onclick="toggle()"></div><nav class="sidebar" id="sb"><div class="brand"><i class="fab fa-linux"></i> Linux DO Reader</div><div class="nav"><a href="/" class="${activeId === "home" ? "active" : ""}"><i class="fas fa-home"></i> 首页广场</a>${nav}<div style="margin:1rem 0; border-top:1px solid rgba(255,255,255,0.1)"></div><a href="/browser" class="${activeId === "browser" ? "active" : ""}"><i class="fas fa-compass"></i> Jina 浏览器</a><a href="/settings" class="${activeId === "settings" ? "active" : ""}"><i class="fas fa-cog"></i> 系统设置</a></div></nav><div class="main"><div class="header"><button class="menu-btn" onclick="toggle()"><i class="fas fa-bars"></i></button><h3>${title}</h3><div style="width:36px"></div></div><div class="content">${body}</div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/marked/13.0.2/marked.min.js"></script><script>function toggle(){document.getElementById('sb').classList.toggle('open');document.querySelector('.overlay').classList.toggle('show')}</script>${IMAGE_PROXY_SCRIPT}${MASONRY_SCRIPT}</body></html>`;
 }
 
 function renderReaderScript(urlJS: string, backLink: string, backText: string) {
@@ -572,14 +645,14 @@ async function handler(req: Request): Promise<Response> {
             <button class="btn btn-outline" onclick="reset()">重置</button>
         </div>
         
-        <div style="margin-top:2rem; padding-top:2rem; border-top:1px solid #e5e7eb;">
+        <div style="margin-top:2rem; padding-top:2rem; border-top:1px solid #e7eb;">
             <h4 style="margin-bottom:1rem;">测试代理</h4>
             <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start;">
                 <img id="test-img" class="lazy" 
                      src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                      data-src="https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png"
                      data-original="https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png"
-                     style="max-width:150px; height:auto; border-radius:8px; border:1px solid #e5e7eb;">
+                     style="max-width:150px; height:auto; border-radius:8px; border:1px solid #e7eb;">
                 <div style="flex:1; min-width:200px; font-size:0.8rem;">
                     <p style="color:#6b7280; margin-bottom:0.3rem;">原始URL:</p>
                     <code style="word-break:break-all; display:block; padding:0.3rem; background:#f3f4f6; border-radius:4px; font-size:0.7rem;">https://linux.do/uploads/default/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png</code>
